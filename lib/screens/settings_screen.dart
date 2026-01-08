@@ -11,6 +11,8 @@ import '../services/database_service.dart';
 import '../services/data_usage_service.dart';
 import '../services/background_service.dart';
 import '../services/tailscale_service.dart';
+import '../services/obd_proxy_service.dart';
+import '../services/native_bluetooth_service.dart';
 import 'debug_log_screen.dart';
 import 'obd_connection_screen.dart';
 import 'obd_pid_config_screen.dart';
@@ -69,6 +71,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // Background service availability
   bool _backgroundServiceAvailable = false;
 
+  // OBD WiFi Proxy
+  OBDProxyService? _proxyService;
+  bool _proxyEnabled = false;
+  String? _proxyClientAddress;
+  int _proxyPort = 35000;
+
   @override
   void initState() {
     super.initState();
@@ -116,6 +124,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _vehicleIdController.dispose();
     _abrpTokenController.dispose();
     _abrpCarModelController.dispose();
+    // Note: Don't dispose proxy service here - let it run in background
     super.dispose();
   }
 
@@ -493,6 +502,64 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         );
       }
+    }
+  }
+
+  /// Start OBD WiFi Proxy
+  Future<void> _startProxy() async {
+    // Create proxy service with a new Bluetooth service instance
+    // The proxy will share the existing Bluetooth connection
+    final bluetooth = NativeBluetoothService();
+
+    _proxyService = OBDProxyService(bluetooth);
+    _proxyService!.onStatusChanged = (isRunning, clientAddress) {
+      if (mounted) {
+        setState(() {
+          _proxyEnabled = isRunning;
+          _proxyClientAddress = clientAddress;
+        });
+      }
+    };
+
+    final success = await _proxyService!.start(port: _proxyPort);
+
+    if (mounted) {
+      setState(() {
+        _proxyEnabled = success;
+      });
+
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('OBD Proxy started on port $_proxyPort'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to start OBD Proxy'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Stop OBD WiFi Proxy
+  Future<void> _stopProxy() async {
+    await _proxyService?.stop();
+    _proxyService = null;
+
+    if (mounted) {
+      setState(() {
+        _proxyEnabled = false;
+        _proxyClientAddress = null;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('OBD Proxy stopped')),
+      );
     }
   }
 
@@ -1046,6 +1113,109 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   },
                 ),
               ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // OBD WiFi Proxy Section
+          _buildSectionHeader('OBD WiFi Proxy'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ListTile(
+                    leading: Icon(
+                      Icons.wifi_tethering,
+                      color: _proxyEnabled ? Colors.green : Colors.grey,
+                    ),
+                    title: const Text('WiFi-to-Bluetooth Bridge'),
+                    subtitle: Text(
+                      _proxyEnabled
+                          ? (_proxyClientAddress != null
+                              ? 'Client connected: $_proxyClientAddress'
+                              : 'Running on port $_proxyPort')
+                          : 'Allow OBD scanner apps to connect via WiFi',
+                    ),
+                  ),
+                  const Divider(),
+                  Text(
+                    'When enabled, OBD scanner apps can connect to this device via WiFi '
+                    'and communicate with your Bluetooth OBD adapter through XPCarData.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (!ref.watch(dataSourceManagerProvider).isObdConnected) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.warning, color: Colors.orange, size: 20),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Connect to Bluetooth OBD adapter first',
+                              style: TextStyle(color: Colors.orange),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: ref.watch(dataSourceManagerProvider).isObdConnected
+                              ? (_proxyEnabled ? _stopProxy : _startProxy)
+                              : null,
+                          icon: Icon(_proxyEnabled ? Icons.stop : Icons.play_arrow),
+                          label: Text(_proxyEnabled ? 'Stop Proxy' : 'Start Proxy'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _proxyEnabled ? Colors.red : Colors.green,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_proxyEnabled) ...[
+                    const SizedBox(height: 16),
+                    FutureBuilder<String>(
+                      future: _proxyService?.getConnectionInfo() ?? Future.value(''),
+                      builder: (context, snapshot) {
+                        if (snapshot.hasData && snapshot.data!.isNotEmpty) {
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.green.withOpacity(0.3)),
+                            ),
+                            child: Text(
+                              snapshot.data!,
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                              ),
+                            ),
+                          );
+                        }
+                        return const SizedBox.shrink();
+                      },
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 24),
