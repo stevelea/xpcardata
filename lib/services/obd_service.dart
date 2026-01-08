@@ -24,6 +24,7 @@ class OBDService {
   bool _isPolling = false; // Mutex to prevent overlapping polls
   bool _isReconnecting = false;
   bool _autoReconnectEnabled = true;
+  bool _pollingPaused = false; // Pause polling when proxy client connected
   int _reconnectAttempts = 0;
   static const int _maxReconnectAttempts = 5;
   String? _connectedDeviceAddress;
@@ -34,6 +35,23 @@ class OBDService {
   Stream<VehicleData> get vehicleDataStream => _dataController.stream;
   bool get isConnected => _isConnected;
   String? get connectedDevice => _connectedDeviceAddress;
+  bool get isPollingPaused => _pollingPaused;
+
+  /// Pause OBD polling (e.g., when proxy client is connected)
+  void pausePolling() {
+    if (!_pollingPaused) {
+      _pollingPaused = true;
+      _logger.log('[OBDService] Polling PAUSED (proxy client connected)');
+    }
+  }
+
+  /// Resume OBD polling
+  void resumePolling() {
+    if (_pollingPaused) {
+      _pollingPaused = false;
+      _logger.log('[OBDService] Polling RESUMED');
+    }
+  }
 
   /// Schedule auto-reconnect after connection loss
   void _scheduleReconnect() {
@@ -515,6 +533,11 @@ class OBDService {
 
     // Poll every 2 seconds to reduce load and prevent app hangs
     _pollingTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      // Skip if polling is paused (proxy client connected)
+      if (_pollingPaused) {
+        return;
+      }
+
       // Skip if already polling (previous poll still in progress)
       if (_isPolling) {
         _logger.log('[OBDService] Skipping poll - previous poll still in progress');

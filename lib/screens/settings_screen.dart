@@ -510,6 +510,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     // Create proxy service with a new Bluetooth service instance
     // The proxy will share the existing Bluetooth connection
     final bluetooth = NativeBluetoothService();
+    final dataSourceManager = ref.read(dataSourceManagerProvider);
 
     _proxyService = OBDProxyService(bluetooth);
     _proxyService!.onStatusChanged = (isRunning, clientAddress) {
@@ -518,6 +519,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _proxyEnabled = isRunning;
           _proxyClientAddress = clientAddress;
         });
+
+        // Pause/resume OBD polling based on client connection
+        if (clientAddress != null) {
+          // Client connected - pause polling to avoid collisions
+          dataSourceManager.obdService.pausePolling();
+        } else if (isRunning) {
+          // Client disconnected but proxy still running - resume polling
+          dataSourceManager.obdService.resumePolling();
+        }
       }
     };
 
@@ -550,6 +560,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _stopProxy() async {
     await _proxyService?.stop();
     _proxyService = null;
+
+    // Resume OBD polling when proxy is stopped
+    final dataSourceManager = ref.read(dataSourceManagerProvider);
+    dataSourceManager.obdService.resumePolling();
 
     if (mounted) {
       setState(() {
