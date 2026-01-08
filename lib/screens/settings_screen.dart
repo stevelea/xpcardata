@@ -12,7 +12,6 @@ import '../services/data_usage_service.dart';
 import '../services/background_service.dart';
 import '../services/tailscale_service.dart';
 import '../services/obd_proxy_service.dart';
-import '../services/native_bluetooth_service.dart';
 import 'debug_log_screen.dart';
 import 'obd_connection_screen.dart';
 import 'obd_pid_config_screen.dart';
@@ -71,8 +70,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // Background service availability
   bool _backgroundServiceAvailable = false;
 
-  // OBD WiFi Proxy
-  OBDProxyService? _proxyService;
+  // OBD WiFi Proxy (uses singleton)
   bool _proxyEnabled = false;
   String? _proxyClientAddress;
   int _proxyPort = 35000;
@@ -84,6 +82,36 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _loadVersionInfo();
     _checkTailscale();
     _checkBackgroundService();
+    _restoreProxyState();
+  }
+
+  /// Restore proxy state from singleton (in case we navigated away and back)
+  void _restoreProxyState() {
+    final proxyService = OBDProxyService.instance;
+    if (proxyService.isRunning) {
+      setState(() {
+        _proxyEnabled = true;
+        _proxyClientAddress = proxyService.clientAddress;
+      });
+
+      // Re-register the status callback
+      final dataSourceManager = ref.read(dataSourceManagerProvider);
+      proxyService.onStatusChanged = (isRunning, clientAddress) {
+        if (mounted) {
+          setState(() {
+            _proxyEnabled = isRunning;
+            _proxyClientAddress = clientAddress;
+          });
+
+          // Pause/resume OBD polling based on client connection
+          if (clientAddress != null) {
+            dataSourceManager.obdService.pausePolling();
+          } else if (isRunning) {
+            dataSourceManager.obdService.resumePolling();
+          }
+        }
+      };
+    }
   }
 
   Future<void> _checkBackgroundService() async {
@@ -507,13 +535,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   /// Start OBD WiFi Proxy
   Future<void> _startProxy() async {
-    // Create proxy service with a new Bluetooth service instance
-    // The proxy will share the existing Bluetooth connection
-    final bluetooth = NativeBluetoothService();
     final dataSourceManager = ref.read(dataSourceManagerProvider);
+    final proxyService = OBDProxyService.instance;
 
-    _proxyService = OBDProxyService(bluetooth);
-    _proxyService!.onStatusChanged = (isRunning, clientAddress) {
+    proxyService.onStatusChanged = (isRunning, clientAddress) {
       if (mounted) {
         setState(() {
           _proxyEnabled = isRunning;
@@ -531,7 +556,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       }
     };
 
-    final success = await _proxyService!.start(port: _proxyPort);
+    final success = await proxyService.start(port: _proxyPort);
 
     if (mounted) {
       setState(() {
@@ -558,8 +583,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   /// Stop OBD WiFi Proxy
   Future<void> _stopProxy() async {
-    await _proxyService?.stop();
-    _proxyService = null;
+    await OBDProxyService.instance.stop();
 
     // Resume OBD polling when proxy is stopped
     final dataSourceManager = ref.read(dataSourceManagerProvider);
@@ -1205,7 +1229,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   if (_proxyEnabled) ...[
                     const SizedBox(height: 16),
                     FutureBuilder<String>(
-                      future: _proxyService?.getConnectionInfo() ?? Future.value(''),
+                      future: OBDProxyService.instance.getConnectionInfo(),
                       builder: (context, snapshot) {
                         if (snapshot.hasData && snapshot.data!.isNotEmpty) {
                           return Container(

@@ -3,7 +3,7 @@ import 'dart:io';
 import 'debug_logger.dart';
 import 'native_bluetooth_service.dart';
 
-/// OBD WiFi Proxy Service
+/// OBD WiFi Proxy Service (Singleton)
 ///
 /// Acts as a WiFi-to-Bluetooth bridge for OBD-II communication.
 /// Allows external OBD scanner apps to connect via WiFi and communicate
@@ -11,6 +11,13 @@ import 'native_bluetooth_service.dart';
 ///
 /// Standard ELM327 WiFi adapters use port 35000.
 class OBDProxyService {
+  // Singleton instance
+  static OBDProxyService? _instance;
+  static OBDProxyService get instance {
+    _instance ??= OBDProxyService._internal(NativeBluetoothService());
+    return _instance!;
+  }
+
   final _logger = DebugLogger.instance;
   final NativeBluetoothService _bluetooth;
 
@@ -29,7 +36,14 @@ class OBDProxyService {
   int get port => _port;
   String? get clientAddress => _client?.remoteAddress.address;
 
-  OBDProxyService(this._bluetooth);
+  // Private constructor for singleton
+  OBDProxyService._internal(this._bluetooth);
+
+  // Legacy constructor (returns singleton)
+  factory OBDProxyService(NativeBluetoothService bluetooth) {
+    _instance ??= OBDProxyService._internal(bluetooth);
+    return _instance!;
+  }
 
   /// Start the WiFi proxy server
   Future<bool> start({int? port}) async {
