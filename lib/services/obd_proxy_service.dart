@@ -43,6 +43,12 @@ class OBDProxyService {
     }
 
     try {
+      _logger.log('[OBDProxy] Starting server on port $_port...');
+
+      // Get the device's WiFi IP address for display
+      final addresses = await _getWiFiAddresses();
+      _logger.log('[OBDProxy] Device IP addresses: $addresses');
+
       // Bind to all interfaces so clients on WiFi can connect
       _server = await ServerSocket.bind(
         InternetAddress.anyIPv4,
@@ -51,12 +57,14 @@ class OBDProxyService {
       );
 
       _isRunning = true;
-      _logger.log('[OBDProxy] Server started on port $_port');
+      _logger.log('[OBDProxy] Server STARTED successfully on port $_port');
 
-      // Get the device's WiFi IP address for display
-      final addresses = await _getWiFiAddresses();
       if (addresses.isNotEmpty) {
-        _logger.log('[OBDProxy] Connect to: ${addresses.first}:$_port');
+        for (final addr in addresses) {
+          _logger.log('[OBDProxy] Connect your OBD app to: $addr:$_port');
+        }
+      } else {
+        _logger.log('[OBDProxy] WARNING: No WiFi IP found - check WiFi connection');
       }
 
       // Listen for incoming connections
@@ -97,17 +105,19 @@ class OBDProxyService {
 
   /// Handle incoming client connection
   void _handleConnection(Socket client) {
+    final clientAddr = '${client.remoteAddress.address}:${client.remotePort}';
+    _logger.log('[OBDProxy] === INCOMING CONNECTION from $clientAddr ===');
+
     // Only allow one client at a time
     if (_client != null) {
-      _logger.log('[OBDProxy] Rejecting connection - already have a client');
+      _logger.log('[OBDProxy] Rejecting connection - already have a client connected');
       client.write('BUSY\r\n');
       client.close();
       return;
     }
 
     _client = client;
-    final clientAddr = '${client.remoteAddress.address}:${client.remotePort}';
-    _logger.log('[OBDProxy] Client connected: $clientAddr');
+    _logger.log('[OBDProxy] Client ACCEPTED: $clientAddr');
 
     onStatusChanged?.call(true, client.remoteAddress.address);
 
@@ -146,7 +156,7 @@ class OBDProxyService {
   /// Handle data received from WiFi client
   Future<void> _handleClientData(List<int> data) async {
     final text = String.fromCharCodes(data);
-    _logger.log('[OBDProxy] RX from client: ${text.trim()}');
+    _logger.log('[OBDProxy] WiFi RX (${data.length} bytes): ${text.trim().replaceAll('\r', '<CR>').replaceAll('\n', '<LF>')}');
 
     // Accumulate data until we get a complete command (ends with \r or \n)
     _receiveBuffer.write(text);
@@ -168,15 +178,17 @@ class OBDProxyService {
   /// Forward command to Bluetooth OBD adapter and return response
   Future<void> _forwardCommand(String command) async {
     try {
+      _logger.log('[OBDProxy] Processing command: "$command"');
+
       // Check if Bluetooth is connected
       final connected = await _bluetooth.isConnected();
       if (!connected) {
-        _logger.log('[OBDProxy] Bluetooth not connected');
+        _logger.log('[OBDProxy] ERROR: Bluetooth not connected!');
         _sendToClient('NO BLUETOOTH CONNECTION\r\n>');
         return;
       }
 
-      _logger.log('[OBDProxy] TX to OBD: $command');
+      _logger.log('[OBDProxy] BT TX: $command');
 
       // Send command to Bluetooth OBD adapter
       await _bluetooth.sendText('$command\r');
@@ -184,13 +196,14 @@ class OBDProxyService {
       // Wait for and collect response
       final response = await _readBluetoothResponse();
 
-      _logger.log('[OBDProxy] RX from OBD: ${response.trim()}');
+      _logger.log('[OBDProxy] BT RX: ${response.trim().replaceAll('\r', '<CR>').replaceAll('\n', '<LF>')}');
 
       // Forward response to WiFi client
       _sendToClient(response);
+      _logger.log('[OBDProxy] Response forwarded to WiFi client');
 
     } catch (e) {
-      _logger.log('[OBDProxy] Error forwarding command: $e');
+      _logger.log('[OBDProxy] ERROR forwarding command: $e');
       _sendToClient('ERROR\r\n>');
     }
   }
