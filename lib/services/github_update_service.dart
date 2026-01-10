@@ -6,8 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Hardcoded app version (updated during build)
 /// This avoids package_info_plus which fails on AAOS
-const String _appVersion = '1.0.8';
-const String _appBuildNumber = '34';
+const String _appVersion = '1.1.0';
+const String _appBuildNumber = '35';
 
 /// Service for checking and downloading updates from GitHub releases
 class GitHubUpdateService {
