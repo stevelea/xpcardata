@@ -2,13 +2,13 @@
 
 ## Overview
 
-XPCarData is a battery monitoring app designed for XPENG electric vehicles. It displays real-time battery status, vehicle metrics, and can integrate with external services like ABRP (A Better Route Planner), MQTT brokers, Home Assistant, and Graylog for remote debugging.
+XPCarData is a battery monitoring app designed for XPENG electric vehicles. It displays real-time battery status, vehicle metrics, and can integrate with external services like ABRP (A Better Route Planner), MQTT brokers, Home Assistant, and Firebase for anonymous fleet statistics.
 
 ## Getting Started
 
 ### Installation
 
-1. Download the latest APK file: `XPCarData-v1.0.7-build32.apk`
+1. Download the latest APK file: `XPCarData-v1.1.0-build35.apk`
 2. Enable "Install from unknown sources" in your Android settings if prompted
 3. Install the APK on your Android device
 
@@ -25,25 +25,26 @@ When you first open XPCarData, the app will automatically attempt to connect to 
 
 The home screen displays:
 
-- **Battery & Range Cards**: Side-by-side display showing:
+- **Battery & Speed Cards**: Side-by-side display showing:
   - **Battery**: Current State of Charge (SOC) percentage with color-coded background
-  - **Guestimated Range**: Calculated driving range in kilometers (SOC × battery capacity × efficiency)
+  - **Speed**: Current vehicle speed in km/h
 - **Data Source & Timestamp**: Shows the active data source (CarInfo API or OBD-II) and when data was last updated
 - **Service Status Icons**: Visual indicators for connected services:
   - **MQTT**: Green when connected to MQTT broker
   - **ABRP**: Green when ABRP telemetry is enabled
   - **Proxy**: Green when OBD Proxy service is running
   - **VPN**: Green when VPN (e.g., Tailscale) is active
+  - **Internet**: Green when internet connectivity is available
 - **Metric Cards**:
   - State of Health (SOH)
+  - Guestimated Range (calculated from SOC × battery capacity × efficiency)
   - Battery Temperature (Max/Min)
-  - Voltage (HV Battery and Cell Max/Min)
-  - Current
-  - Power (kW)
-  - Speed
+  - Voltage / Current / Power (consolidated card)
+  - Cell voltages (Max/Min)
   - Odometer
   - DC Charging data (when charging)
   - Coolant temperatures
+- **Recent Charging Sessions**: Quick view of recent charging activity with link to full history
 - **Additional Data**: Any extra PIDs configured will appear below the main metrics
 
 Pull down to refresh the data manually.
@@ -92,6 +93,29 @@ Configure your vehicle model for accurate battery capacity:
 
 This affects the "Guestimated Range" calculation on the dashboard.
 
+### Fleet Statistics (Anonymous)
+
+Share anonymous data to help build fleet-wide insights:
+
+1. Go to **Settings > Fleet Statistics**
+2. Enable **Share Anonymous Fleet Data**
+3. First-time enable shows a consent dialog explaining what data is collected
+4. Once enabled, tap **View Fleet Statistics** to see aggregated data
+
+**Data collected (anonymized):**
+- Battery health (SOH) percentages
+- Charging session statistics (power, duration)
+- Battery temperature ranges
+- AC vs DC charging usage
+- Country (from IP geolocation - country code only)
+
+**NOT collected:**
+- No GPS location or coordinates
+- No IP addresses (only country code)
+- No vehicle identification numbers
+- No personal information
+- No exact timestamps or routes
+
 ### ABRP Integration
 
 To send live telemetry to A Better Route Planner:
@@ -105,7 +129,17 @@ To send live telemetry to A Better Route Planner:
 5. Optionally set your car model identifier
 6. Adjust the update interval (minimum 5 seconds, recommended 30 seconds)
 
-Data sent to ABRP includes: SOC, SOH, speed, voltage, current, power, battery temperature, and odometer.
+Data sent to ABRP includes: SOC, SOH, speed, voltage, current, power, battery temperature, odometer, and location (if enabled).
+
+### Location Services
+
+Enable GPS location tracking:
+
+1. Go to **Settings > Location Services**
+2. Enable location tracking
+3. Grant location permission when prompted
+
+Location data is used to enrich ABRP telemetry and MQTT data. No location data is sent to Fleet Analytics.
 
 ### MQTT Publishing
 
@@ -225,7 +259,7 @@ XPCarData automatically detects when your vehicle is charging:
 
 ### AC vs DC Detection
 
-- **DC Charging**: Current magnitude >= 50A, or BMS status = 2
+- **DC Charging**: Current magnitude >= 50A, or BMS status = 2/4
 - **AC Charging**: Current magnitude < 50A, or BMS status = 3
 
 ### Charging Sessions
@@ -238,6 +272,35 @@ The app automatically tracks charging sessions including:
 - Peak power
 
 View charging history in **Settings > Charging History**.
+
+## Fleet Statistics
+
+When Fleet Statistics is enabled, you can view aggregated data from all contributing users:
+
+1. Go to **Settings > Fleet Statistics > View Fleet Statistics**
+2. See how your vehicle compares to the fleet:
+   - **Your SOH vs Fleet Average**: Compare your battery health
+   - **Charging Statistics**: Average AC/DC power, charging type distribution
+   - **SOH Distribution**: See the spread of battery health across the fleet
+   - **Contributors by Country**: Geographic distribution of users
+
+Data is updated periodically and aggregated from all opt-in users.
+
+## App Updates
+
+Check for and install updates directly from the app:
+
+1. Go to **Settings > Updates**
+2. Tap **Check for Updates**
+3. If an update is available, you can download and install it
+
+**GitHub Rate Limiting:** If you see "rate limit exceeded" errors, you can add a GitHub personal access token:
+1. Tap **GitHub Token** in the Updates section
+2. Create a token at github.com → Settings → Developer settings → Personal access tokens
+3. Generate a new token (no scopes needed)
+4. Paste the token in the app
+
+This increases the API limit from 60 to 5000 requests per hour.
 
 ## Troubleshooting
 
@@ -279,21 +342,6 @@ On startup, it will automatically attempt to reconnect to the last known device.
 3. Some PIDs may not be supported by all vehicle variants
 4. The app automatically migrates to the latest PID profile version when formulas are updated
 
-### Check for Updates
-
-The app can check for updates from GitHub releases:
-1. Go to **Settings > Updates**
-2. Tap **Check for Updates**
-3. If an update is available, you can download and install it directly
-
-**GitHub Rate Limiting:** If you see "rate limit exceeded" errors, you can add a GitHub personal access token:
-1. Go to **Settings > Updates > GitHub Token**
-2. Create a token at github.com → Settings → Developer settings → Personal access tokens
-3. Generate a new token (no scopes needed)
-4. Paste the token in the app
-
-This increases the API limit from 60 to 5000 requests per hour.
-
 ## Debug Log
 
 Access the debug log via **Settings > Debug Log** to view:
@@ -302,6 +350,7 @@ Access the debug log via **Settings > Debug Log** to view:
 - Data source changes
 - PID polling (high/low priority)
 - ABRP transmission status
+- Fleet Analytics uploads
 - Charging detection events
 - Error messages
 
@@ -310,9 +359,10 @@ Use **Share Log** to export the log for troubleshooting.
 ## Privacy & Data
 
 - Vehicle data is stored locally on your device
-- Data is only transmitted to external services (ABRP, MQTT, Graylog) if you explicitly enable and configure them
-- No data is collected by the app developers
+- Data is only transmitted to external services (ABRP, MQTT, Fleet Analytics) if you explicitly enable and configure them
+- Fleet Analytics data is anonymous and aggregated - no PII is collected
+- No data is collected by the app developers without your consent
 
 ## Support
 
-For issues and feature requests, please contact the developer or submit an issue on the project repository.
+For issues and feature requests, please visit: https://github.com/stevelea/xpcardata

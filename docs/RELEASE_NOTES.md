@@ -1,6 +1,60 @@
 # XPCarData Release Notes
 
-## Version 1.0.7 (Build 32) - 2026-01-11
+## Version 1.1.0 (Build 35) - 2026-01-10
+
+### Major Features
+
+- **Firebase Analytics Integration**: Optional anonymous fleet statistics collection
+  - Aggregated battery health, charging patterns, and efficiency data across all users
+  - Privacy-preserving: all data anonymized and bucketed
+  - Opt-in with explicit consent dialog
+  - Country detection via IP geolocation (country code only, no IP stored)
+
+- **Fleet Statistics Screen**: New screen showing aggregated data from contributing users
+  - Average SOH comparison with your vehicle
+  - Charging statistics (AC vs DC usage, average power)
+  - SOH distribution across the fleet
+  - Country distribution of contributors
+
+- **Charging Session History**: Track and view all charging sessions
+  - Start/end time, energy added, SOC change
+  - Charging type (AC/DC), peak power
+  - Accessible from Settings > Charging History
+
+- **GitHub-Based App Updates**: Check for and install updates directly from the app
+  - Settings > Updates > Check for Updates
+  - Optional GitHub token for higher API rate limits
+
+- **Location Services**: Optional GPS location tracking
+  - Enrich ABRP data with location for better route planning
+  - Location data only sent to enabled services (ABRP, MQTT)
+
+### Improvements
+
+- **OBD-II WiFi Proxy Support**: Full proxy implementation for external app data sharing
+- **Enhanced Connectivity Detection**: Real-time internet status via DNS lookup
+- **Improved Charging Detection**: Multiple indicators for reliable AC/DC detection
+
+### Privacy
+
+All Fleet Analytics data is:
+- **Anonymous**: Hash-based device ID, no traceability
+- **Bucketed**: Values rounded to intervals (5% for SOC/SOH, 10 kW for power)
+- **Opt-in**: Disabled by default, requires explicit consent
+- **No PII**: No GPS coordinates, vehicle IDs, or personal information collected
+
+---
+
+## Version 1.0.8 (Build 34) - 2026-01-10
+
+### Features
+
+- Firebase Analytics setup and integration
+- Fleet Statistics foundation
+
+---
+
+## Version 1.0.7 (Build 32) - 2026-01-10
 
 ### New Features
 
@@ -23,7 +77,7 @@
 
 ---
 
-## Version 1.0.6 (Build 31) - 2026-01-11
+## Version 1.0.6 (Build 31) - 2026-01-10
 
 ### Bug Fixes
 
@@ -38,7 +92,7 @@
 
 ---
 
-## Version 1.0.5 (Build 30) - 2026-01-11
+## Version 1.0.5 (Build 30) - 2026-01-10
 
 ### New Features
 
@@ -80,7 +134,6 @@
 
 ### New Features
 
-- **Graylog Log Streaming**: Optional debug log streaming to Graylog server via UDP GELF
 - **OBD Proxy Service**: Proxy OBD data to external applications
 
 ### Bug Fixes
@@ -146,66 +199,6 @@
 
 ---
 
-## Version History
-
-### Build 32 (2026-01-11)
-- **Dashboard charging history**: Recent sessions shown on dashboard with "View All" link
-- **Internet status indicator**: Real-time connectivity monitoring via DNS lookup
-- **PID priority indicators**: Grey dot shown for low-priority PIDs
-- **Consolidated Power card**: V/A/kW in single card
-- **Speed/Range swap**: Speed now primary with SOC, Range in grid
-- **Charging end detection fix**: Requires 2 consecutive non-charging samples
-- **Removed Graylog**: Feature removed from settings
-
-### Build 31 (2026-01-11)
-- **Fixed charging indicator**: Now correctly uses negative current for charging detection
-- **BMS_CHG_STATUS value 4**: Support for high-power DC charging status
-- **GitHub token**: Optional token support to avoid rate limiting
-- **Better DC power display**: Uses DC charger PIDs for accurate power reading
-
-### Build 30 (2026-01-11)
-- **Priority-based PID polling**: High priority every 5 sec, low priority every 5 min
-- **Improved charging detection**: HV current-based with 2-sample stationary requirement
-- **Dashboard**: Changed "Range" to "Guestimated Range"
-- **Fixed**: package_info_plus failure on AAOS, About section display
-
-### Build 29 (2026-01-10)
-- **Fixed AC charging formulas**: AC_CHG_A = [B4:B5]*2, AC_CHG_V = B4*3
-- **PID profile migration**: Auto-refresh when formulas change
-- **Bluetooth**: Improved address storage reliability
-
-### Build 28 (2026-01-09)
-- **Graylog integration**: UDP GELF log streaming
-- **OBD Proxy service**: Data routing to external apps
-- **Bluetooth fixes**: Auto-reconnect improvements
-
-### Build 27 (2026-01-09)
-- Additional BMS PIDs discovered and documented
-- Charging session improvements
-
-### Build 26 (2026-01-08)
-- PID formula corrections
-- Multi-frame response handling improvements
-
-### Build 25 (2026-01-08)
-- **Dashboard redesign**: Side-by-side Battery SOC and Estimated Range display with colored cards
-- **Human-readable timestamp**: Shows when data was last updated (e.g., "12:34:56" or "2 min ago")
-- **Service status icons**: Visual indicators for MQTT, ABRP, OBD Proxy, and VPN connection status
-- **VPN status detection**: Real-time VPN status using Android ConnectivityManager API
-- Added native Kotlin code for VPN detection via NetworkCapabilities.TRANSPORT_VPN
-
-### Build 24 (2026-01-08)
-- **11 new PIDs added**: Comprehensive battery and charging data
-- **Charging type detection**: Automatic AC/DC charging detection based on voltage threshold
-- **Power calculation**: Real-time power calculated from voltage × current
-- **Enhanced charging sessions**: Tracks charging type, DC power, cumulative energy
-
-### Builds 1-23
-- Initial development and feature additions
-- See earlier release notes for complete history
-
----
-
 ## Known Issues
 
 - Custom APK naming outputs to `build/app/outputs/apk/release/` folder
@@ -216,12 +209,12 @@
 
 - Android 10 (API 29) or higher
 - Bluetooth permission for OBD-II connection
-- Internet permission for ABRP, MQTT, and Graylog
+- Internet permission for ABRP, MQTT, and Fleet Analytics
 - For CarInfo API: XPENG Android Automotive OS
 
 ## Installation
 
-1. Download `XPCarData-v1.0.7-build32.apk`
+1. Download `XPCarData-v1.1.0-build35.apk`
 2. Enable installation from unknown sources if prompted
 3. Install on your Android device (AI Box, phone, or tablet)
 
@@ -229,7 +222,7 @@
 
 ## File Locations
 
-- APK: `/Users/stevelea/CarSOC/XPCarData-v1.0.7-build32.apk`
+- APK: `/Users/stevelea/CarSOC/XPCarData-v1.1.0-build35.apk`
 - User Guide: `docs/USER_GUIDE.md`
 - Release Notes: `docs/RELEASE_NOTES.md`
 - PID Reference: `docs/XPENG_G6_PIDs.md`
