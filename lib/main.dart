@@ -3,18 +3,30 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'services/database_service.dart';
 import 'services/data_usage_service.dart';
 import 'services/background_service.dart';
 import 'services/tailscale_service.dart';
+import 'services/fleet_analytics_service.dart';
 import 'providers/vehicle_data_provider.dart';
 import 'providers/mqtt_provider.dart';
 import 'screens/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Firebase (non-blocking - let it fail gracefully)
+  try {
+    await Firebase.initializeApp();
+    await FleetAnalyticsService.instance.initialize();
+    print('Firebase initialized successfully');
+  } catch (e) {
+    print('Firebase initialization failed: $e');
+    print('App will continue without fleet analytics');
+  }
 
   // Initialize database (non-blocking - let it fail gracefully)
   try {

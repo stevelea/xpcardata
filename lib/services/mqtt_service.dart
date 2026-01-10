@@ -8,6 +8,9 @@ import '../models/alert.dart';
 import '../models/charging_session.dart';
 import 'data_usage_service.dart';
 
+/// App version constant (updated during build)
+const String _appVersion = '1.0.6';
+
 /// Service for publishing vehicle data to MQTT broker
 class MqttService {
   MqttServerClient? _client;
@@ -31,6 +34,8 @@ class MqttService {
   int _reconnectAttempts = 0;
   static const int _maxReconnectAttempts = 5;
   Timer? _reconnectTimer;
+  Timer? _periodicReconnectTimer;
+  int _periodicReconnectIntervalSeconds = 0; // 0 = disabled
 
   /// Get Home Assistant discovery enabled state
   bool get haDiscoveryEnabled => _haDiscoveryEnabled;
@@ -48,6 +53,16 @@ class MqttService {
 
   bool get isConnected =>
       _client?.connectionStatus?.state == MqttConnectionState.connected;
+
+  /// Get periodic reconnect interval in seconds (0 = disabled)
+  int get periodicReconnectInterval => _periodicReconnectIntervalSeconds;
+
+  /// Set periodic reconnect interval in seconds (0 = disabled)
+  /// When enabled, will attempt to reconnect at this interval if disconnected
+  set periodicReconnectInterval(int seconds) {
+    _periodicReconnectIntervalSeconds = seconds;
+    _updatePeriodicReconnect();
+  }
 
   /// Initialize and connect to MQTT broker
   Future<bool> connect({
@@ -184,6 +199,25 @@ class MqttService {
     }
   }
 
+  /// Publish charging history (list of sessions) to MQTT with retain flag
+  Future<void> publishChargingHistory(List<ChargingSession> sessions) async {
+    if (!isConnected || _vehicleId == null) {
+      return;
+    }
+
+    try {
+      final topic = 'vehicles/$_vehicleId/charging_history';
+      final payload = jsonEncode({
+        'sessions': sessions.map((s) => s.toJson()).toList(),
+        'count': sessions.length,
+        'lastUpdated': DateTime.now().toIso8601String(),
+      });
+      _publishMessage(topic, payload, MqttQos.atLeastOnce, retain: true);
+    } catch (e) {
+      // Silently fail
+    }
+  }
+
   /// Helper method to publish message
   void _publishMessage(
     String topic,
@@ -231,7 +265,7 @@ class MqttService {
       'name': 'XPCarData $_vehicleId',
       'manufacturer': 'XPENG',
       'model': 'G6',
-      'sw_version': '1.0.0',
+      'sw_version': _appVersion,
     };
 
     // Define all sensors with their configurations
@@ -319,6 +353,46 @@ class MqttService {
         'unit_of_measurement': 'kWh',
         'value_template': '{{ value_json.batteryCapacity | default(0) | round(1) }}',
         'icon': 'mdi:battery-high',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Latitude',
+        'object_id': 'latitude',
+        'unit_of_measurement': '°',
+        'value_template': '{{ value_json.latitude | default(0) | round(6) }}',
+        'icon': 'mdi:crosshairs-gps',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Longitude',
+        'object_id': 'longitude',
+        'unit_of_measurement': '°',
+        'value_template': '{{ value_json.longitude | default(0) | round(6) }}',
+        'icon': 'mdi:crosshairs-gps',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Altitude',
+        'object_id': 'altitude',
+        'unit_of_measurement': 'm',
+        'value_template': '{{ value_json.altitude | default(0) | round(0) }}',
+        'icon': 'mdi:altimeter',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'GPS Speed',
+        'object_id': 'gps_speed',
+        'device_class': 'speed',
+        'unit_of_measurement': 'km/h',
+        'value_template': '{{ value_json.gpsSpeed | default(0) | round(0) }}',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Heading',
+        'object_id': 'heading',
+        'unit_of_measurement': '°',
+        'value_template': '{{ value_json.heading | default(0) | round(0) }}',
+        'icon': 'mdi:compass',
         'state_class': 'measurement',
       },
     ];
@@ -463,9 +537,46 @@ class MqttService {
     });
   }
 
+  /// Update periodic reconnect timer based on current settings
+  void _updatePeriodicReconnect() {
+    _periodicReconnectTimer?.cancel();
+    _periodicReconnectTimer = null;
+
+    if (_periodicReconnectIntervalSeconds > 0) {
+      _periodicReconnectTimer = Timer.periodic(
+        Duration(seconds: _periodicReconnectIntervalSeconds),
+        (_) => _tryPeriodicReconnect(),
+      );
+    }
+  }
+
+  /// Try to reconnect if not connected (called by periodic timer)
+  Future<void> _tryPeriodicReconnect() async {
+    if (isConnected || _isConnecting) {
+      return; // Already connected or connecting
+    }
+
+    if (_broker == null || _port == null || _vehicleId == null) {
+      return; // No connection settings configured
+    }
+
+    // Reset reconnect attempts to allow a fresh try
+    _reconnectAttempts = 0;
+
+    await connect(
+      broker: _broker!,
+      port: _port!,
+      vehicleId: _vehicleId!,
+      username: _username,
+      password: _password,
+      useTLS: _useTLS,
+    );
+  }
+
   /// Dispose resources
   void dispose() {
     _reconnectTimer?.cancel();
+    _periodicReconnectTimer?.cancel();
     disconnect();
     _connectionStateController.close();
   }

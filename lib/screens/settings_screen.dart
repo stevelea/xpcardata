@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../providers/mqtt_provider.dart';
 import '../providers/vehicle_data_provider.dart';
@@ -12,9 +11,15 @@ import '../services/data_usage_service.dart';
 import '../services/background_service.dart';
 import '../services/tailscale_service.dart';
 import '../services/obd_proxy_service.dart';
+import '../services/github_update_service.dart';
+import '../services/fleet_analytics_service.dart';
+import '../build_info.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'debug_log_screen.dart';
 import 'obd_connection_screen.dart';
 import 'obd_pid_config_screen.dart';
+import 'charging_history_screen.dart';
+import 'fleet_stats_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Settings screen for app configuration
@@ -36,6 +41,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _useTLS = true;
   bool _mqttEnabled = false;
   bool _haDiscoveryEnabled = false;
+  int _mqttReconnectIntervalSeconds = 0; // 0 = disabled
 
   // ABRP Settings Controllers
   final _abrpTokenController = TextEditingController();
@@ -75,6 +81,33 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String? _proxyClientAddress;
   int _proxyPort = 35000;
 
+  // Location Services
+  bool _locationEnabled = false;
+
+  // Vehicle Model / Battery Size
+  String _vehicleModel = '24LR'; // Default to 24 Long Range
+
+  // Fleet Analytics
+  bool _fleetAnalyticsEnabled = false;
+
+  // Update feature
+  bool _checkingForUpdates = false;
+  bool _downloadingUpdate = false;
+  double _downloadProgress = 0.0;
+
+  static const Map<String, double> _batteryCapacities = {
+    '24LR': 87.5,   // 2024 Long Range / AWD
+    '24SR': 66.0,   // 2024 Standard Range
+    '25LR': 80.8,   // 2025 Long Range / AWD
+    '25SR': 68.5,   // 2025 Standard Range
+  };
+  static const Map<String, String> _modelLabels = {
+    '24LR': '2024 LR/AWD (87.5 kWh)',
+    '24SR': '2024 SR (66 kWh)',
+    '25LR': '2025 LR/AWD (80.8 kWh)',
+    '25SR': '2025 SR (68.5 kWh)',
+  };
+
   @override
   void initState() {
     super.initState();
@@ -83,6 +116,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _checkTailscale();
     _checkBackgroundService();
     _restoreProxyState();
+    _loadLocationState();
+    _loadFleetAnalyticsState();
+  }
+
+  /// Load fleet analytics state
+  void _loadFleetAnalyticsState() {
+    setState(() {
+      _fleetAnalyticsEnabled = FleetAnalyticsService.instance.isEnabled;
+    });
+  }
+
+  /// Load location service state from DataSourceManager
+  void _loadLocationState() {
+    try {
+      final dataSourceManager = ref.read(dataSourceManagerProvider);
+      setState(() {
+        _locationEnabled = dataSourceManager.isLocationEnabled;
+      });
+    } catch (e) {
+      // Data source manager not available yet
+    }
   }
 
   /// Restore proxy state from singleton (in case we navigated away and back)
@@ -134,13 +188,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _loadVersionInfo() async {
-    final packageInfo = await PackageInfo.fromPlatform();
+    // Use hardcoded version info (package_info_plus fails on AAOS)
+    // These constants are defined in github_update_service.dart and kept in sync with pubspec.yaml
     setState(() {
-      _version = packageInfo.version;
-      _buildNumber = packageInfo.buildNumber;
-      // Build date - update this when releasing new builds
-      _buildDate = '2026-01-07';
+      _version = '1.0.8';
+      _buildNumber = '33';
+      // Build date/time - automatically captured at compile time
+      _buildDate = _getBuildDateTime();
     });
+  }
+
+  /// Get the build date/time from BuildInfo constant
+  String _getBuildDateTime() {
+    return BuildInfo.buildDateTime;
   }
 
   @override
@@ -173,6 +233,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _useTLS = prefs.getBool('mqtt_use_tls') ?? false;
         _mqttEnabled = prefs.getBool('mqtt_enabled') ?? false;
         _haDiscoveryEnabled = prefs.getBool('ha_discovery_enabled') ?? false;
+        _mqttReconnectIntervalSeconds = prefs.getInt('mqtt_reconnect_interval') ?? 0;
 
         // Alert Thresholds
         _lowBatteryThreshold = prefs.getDouble('alert_low_battery') ?? 20.0;
@@ -197,6 +258,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
         // Tailscale Settings
         _tailscaleAutoConnect = prefs.getBool('tailscale_auto_connect') ?? false;
+
+        // Vehicle Model
+        _vehicleModel = prefs.getString('vehicle_model') ?? '24LR';
       });
       loadedFromPrefs = true;
     } catch (e) {
@@ -246,6 +310,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _useTLS = settings['mqtt_use_tls'] ?? false;
           _mqttEnabled = settings['mqtt_enabled'] ?? false;
           _haDiscoveryEnabled = settings['ha_discovery_enabled'] ?? false;
+          _mqttReconnectIntervalSeconds = settings['mqtt_reconnect_interval'] ?? 0;
           _lowBatteryThreshold = (settings['alert_low_battery'] ?? 20.0).toDouble();
           _criticalBatteryThreshold = (settings['alert_critical_battery'] ?? 10.0).toDouble();
           _highTempThreshold = (settings['alert_high_temp'] ?? 45.0).toDouble();
@@ -262,6 +327,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
           // Tailscale Settings
           _tailscaleAutoConnect = settings['tailscale_auto_connect'] ?? false;
+
+          // Vehicle Model
+          _vehicleModel = settings['vehicle_model'] ?? '24LR';
         });
         print('Settings loaded from file: $filePath');
       }
@@ -291,6 +359,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       await prefs.setBool('mqtt_use_tls', _useTLS);
       await prefs.setBool('mqtt_enabled', _mqttEnabled);
       await prefs.setBool('ha_discovery_enabled', _haDiscoveryEnabled);
+      await prefs.setInt('mqtt_reconnect_interval', _mqttReconnectIntervalSeconds);
 
       // Alert Thresholds
       await prefs.setDouble('alert_low_battery', _lowBatteryThreshold);
@@ -316,6 +385,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       // Tailscale Settings
       await prefs.setBool('tailscale_auto_connect', _tailscaleAutoConnect);
 
+      // Vehicle Model
+      await prefs.setString('vehicle_model', _vehicleModel);
+
       savedToPrefs = true;
     } catch (e) {
       print('SharedPreferences save failed (file save used): $e');
@@ -338,10 +410,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       // Data source manager not available, skip
     }
 
-    // Apply Home Assistant discovery setting to MQTT service
+    // Apply Home Assistant discovery and reconnect interval settings to MQTT service
     try {
       final mqttService = ref.read(mqttServiceProvider);
       mqttService.haDiscoveryEnabled = _haDiscoveryEnabled;
+      mqttService.periodicReconnectInterval = _mqttReconnectIntervalSeconds;
     } catch (e) {
       // MQTT service not available, skip
     }
@@ -382,6 +455,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         'mqtt_use_tls': _useTLS,
         'mqtt_enabled': _mqttEnabled,
         'ha_discovery_enabled': _haDiscoveryEnabled,
+        'mqtt_reconnect_interval': _mqttReconnectIntervalSeconds,
         'alert_low_battery': _lowBatteryThreshold,
         'alert_critical_battery': _criticalBatteryThreshold,
         'alert_high_temp': _highTempThreshold,
@@ -394,6 +468,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         'abrp_enabled': _abrpEnabled,
         'abrp_interval_seconds': _abrpIntervalSeconds,
         'tailscale_auto_connect': _tailscaleAutoConnect,
+        'vehicle_model': _vehicleModel,
       };
 
       final file = File(filePath);
@@ -601,6 +676,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
+  /// Show vehicle model picker dialog
+  void _showVehicleModelPicker() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Select Vehicle Model'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: _modelLabels.entries.map((entry) {
+            return RadioListTile<String>(
+              title: Text(entry.value),
+              value: entry.key,
+              groupValue: _vehicleModel,
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() => _vehicleModel = value);
+                  Navigator.pop(context);
+                  _saveSettings();
+                }
+              },
+            );
+          }).toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Clear all data from database
   Future<void> _clearAllData() async {
     final confirmed = await showDialog<bool>(
@@ -751,6 +859,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       : null,
                   secondary: const Icon(Icons.home),
                 ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.refresh),
+                  title: const Text('Auto-Reconnect Interval'),
+                  subtitle: Text(_formatReconnectInterval(_mqttReconnectIntervalSeconds)),
+                  enabled: _mqttEnabled,
+                ),
+                Slider(
+                  value: _mqttReconnectIntervalSeconds.toDouble(),
+                  min: 0,
+                  max: 300,
+                  divisions: 30,
+                  label: _formatReconnectInterval(_mqttReconnectIntervalSeconds),
+                  onChanged: _mqttEnabled
+                      ? (value) => setState(() => _mqttReconnectIntervalSeconds = value.toInt())
+                      : null,
+                ),
+                Text(
+                  '0 = disabled, or 10-300 seconds',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 ElevatedButton.icon(
                   onPressed: _mqttEnabled ? _testMqttConnection : null,
@@ -855,6 +986,40 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           const SizedBox(height: 24),
 
+          // Vehicle Settings Section
+          _buildSectionHeader('Vehicle Settings'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.directions_car),
+                    title: const Text('Vehicle Model'),
+                    subtitle: Text(_modelLabels[_vehicleModel] ?? 'Unknown'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _showVehicleModelPicker(),
+                  ),
+                  const Divider(),
+                  ListTile(
+                    leading: const Icon(Icons.battery_full),
+                    title: const Text('Battery Capacity'),
+                    subtitle: Text('${_batteryCapacities[_vehicleModel]?.toStringAsFixed(1) ?? "--"} kWh'),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Battery capacity is used for range estimation and energy calculations.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).hintColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
           // ABRP Settings Section
           _buildSectionHeader('A Better Route Planner (ABRP)'),
           Card(
@@ -921,6 +1086,66 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Fleet Statistics Section
+          _buildSectionHeader('Fleet Statistics (Anonymous)'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SwitchListTile(
+                    title: const Text('Share Anonymous Fleet Data'),
+                    subtitle: const Text('Help improve the app with aggregated statistics'),
+                    value: _fleetAnalyticsEnabled,
+                    onChanged: (value) async {
+                      if (value && !FleetAnalyticsService.instance.consentGiven) {
+                        // Show consent dialog for first-time enable
+                        final consent = await _showFleetAnalyticsConsentDialog();
+                        if (consent != true) return;
+                      }
+
+                      await FleetAnalyticsService.instance.configure(
+                        enabled: value,
+                        consentGiven: value ? true : null,
+                        vehicleModel: _vehicleModel,
+                      );
+                      setState(() => _fleetAnalyticsEnabled = value);
+                    },
+                    secondary: Icon(
+                      Icons.analytics,
+                      color: _fleetAnalyticsEnabled ? Colors.blue : Colors.grey,
+                    ),
+                  ),
+                  const Divider(),
+                  Text(
+                    'When enabled, anonymous battery health and charging statistics are shared '
+                    'to help build fleet-wide insights. No personal data, location, or vehicle ID is collected.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (_fleetAnalyticsEnabled) ...[
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const FleetStatsScreen(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.bar_chart),
+                      label: const Text('View Fleet Statistics'),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1105,6 +1330,84 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           const SizedBox(height: 24),
 
+          // Location Services Section
+          _buildSectionHeader('Location Services'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SwitchListTile(
+                    title: const Text('Enable GPS Tracking'),
+                    subtitle: const Text('Track vehicle location via phone GPS'),
+                    value: _locationEnabled,
+                    onChanged: (value) async {
+                      final dataSourceManager = ref.read(dataSourceManagerProvider);
+                      final scaffoldMessenger = ScaffoldMessenger.of(context);
+                      final success = await dataSourceManager.setLocationEnabled(value);
+                      if (success) {
+                        setState(() => _locationEnabled = value);
+                      } else if (mounted) {
+                        scaffoldMessenger.showSnackBar(
+                          const SnackBar(
+                            content: Text('Failed to enable location - check permissions'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    },
+                    secondary: Icon(
+                      Icons.location_on,
+                      color: _locationEnabled ? Colors.teal : Colors.grey,
+                    ),
+                  ),
+                  const Divider(),
+                  Text(
+                    'When enabled, GPS coordinates are added to vehicle data and published via MQTT. '
+                    'Location is not sent to ABRP (it uses its own GPS).',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (_locationEnabled) ...[
+                    const SizedBox(height: 16),
+                    Builder(
+                      builder: (context) {
+                        final dataSourceManager = ref.watch(dataSourceManagerProvider);
+                        final lastLocation = dataSourceManager.locationService.lastLocation;
+                        if (lastLocation != null) {
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.teal.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.teal.withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.my_location, color: Colors.teal, size: 20),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    '${lastLocation.latitude.toStringAsFixed(5)}, ${lastLocation.longitude.toStringAsFixed(5)}',
+                                    style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        return const SizedBox.shrink();
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
           // Data Sources Section
           _buildSectionHeader('Data Sources'),
           Card(
@@ -1146,6 +1449,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       context,
                       MaterialPageRoute(
                         builder: (context) => const OBDPIDConfigScreen(),
+                      ),
+                    );
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.ev_station),
+                  title: const Text('Charging History'),
+                  subtitle: const Text('View charging sessions & consumption'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ChargingHistoryScreen(),
                       ),
                     );
                   },
@@ -1384,6 +1702,92 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           const SizedBox(height: 16),
 
+          // Updates Section
+          _buildSectionHeader('Updates'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ListTile(
+                    leading: Icon(
+                      Icons.system_update,
+                      color: GitHubUpdateService.instance.updateAvailable
+                          ? Colors.orange
+                          : Colors.grey,
+                    ),
+                    title: const Text('Check for Updates'),
+                    subtitle: Text(
+                      GitHubUpdateService.instance.updateAvailable
+                          ? 'Version ${GitHubUpdateService.instance.latestRelease?.version} available'
+                          : 'Current version: $_version',
+                    ),
+                    trailing: _checkingForUpdates
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.chevron_right),
+                    onTap: _checkingForUpdates ? null : _checkForUpdates,
+                  ),
+                  if (_downloadingUpdate) ...[
+                    const Divider(),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Downloading update...'),
+                          const SizedBox(height: 8),
+                          LinearProgressIndicator(value: _downloadProgress),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${(_downloadProgress * 100).toStringAsFixed(0)}%',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (GitHubUpdateService.instance.updateAvailable &&
+                      !_downloadingUpdate) ...[
+                    const Divider(),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: ElevatedButton.icon(
+                        onPressed: _downloadAndInstallUpdate,
+                        icon: const Icon(Icons.download),
+                        label: const Text('Download & Install'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const Divider(),
+                  ListTile(
+                    leading: const Icon(Icons.key),
+                    title: const Text('GitHub Token (Optional)'),
+                    subtitle: const Text('For higher API rate limits'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: _showGitHubTokenDialog,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Updates are downloaded from GitHub releases. Add a token to avoid rate limiting.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
           // About Section
           _buildSectionHeader('About'),
           Card(
@@ -1503,6 +1907,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return '$mins min $secs sec';
   }
 
+  /// Format MQTT reconnect interval for display
+  String _formatReconnectInterval(int seconds) {
+    if (seconds == 0) {
+      return 'Disabled';
+    }
+    if (seconds < 60) {
+      return '$seconds sec';
+    }
+    final mins = seconds ~/ 60;
+    final secs = seconds % 60;
+    if (secs == 0) {
+      return '$mins min';
+    }
+    return '$mins min $secs sec';
+  }
+
   /// Show dialog to direct user to app settings for permission
   void _showPermissionSettingsDialog(String permissionName) {
     showDialog(
@@ -1530,6 +1950,73 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
+  /// Show consent dialog for fleet analytics
+  Future<bool?> _showFleetAnalyticsConsentDialog() async {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.analytics, color: Colors.blue),
+            SizedBox(width: 12),
+            Text('Fleet Statistics'),
+          ],
+        ),
+        content: const SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Help improve XPCarData by sharing anonymous statistics with other users.',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 16),
+              Text(
+                'What we collect:',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              SizedBox(height: 8),
+              Text('• Battery health (SOH) percentages'),
+              Text('• Charging session statistics (power, duration)'),
+              Text('• Battery temperature ranges'),
+              Text('• AC vs DC charging usage'),
+              Text('• Country (from IP geolocation)'),
+              SizedBox(height: 16),
+              Text(
+                'What we DO NOT collect:',
+                style: TextStyle(fontWeight: FontWeight.w600, color: Colors.green),
+              ),
+              SizedBox(height: 8),
+              Text('• No GPS location or coordinates'),
+              Text('• No IP addresses (only country code)'),
+              Text('• No vehicle identification numbers'),
+              Text('• No personal information'),
+              Text('• No exact timestamps or routes'),
+              SizedBox(height: 16),
+              Text(
+                'All data is anonymized and aggregated. You can disable this at any time.',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('No Thanks'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.check),
+            label: const Text('I Agree'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Get number of divisions for update frequency slider
   /// This provides better granularity at lower values
   int _getUpdateFrequencyDivisions() {
@@ -1538,5 +2025,264 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     // 1-10m: every 30 seconds (18 divisions)
     // Total: ~38 divisions
     return 99;
+  }
+
+  /// Show dialog to enter GitHub token
+  Future<void> _showGitHubTokenDialog() async {
+    final controller = TextEditingController();
+
+    // Load existing token
+    await GitHubUpdateService.instance.loadGitHubToken();
+
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('GitHub Token'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Add a GitHub personal access token to avoid rate limiting.\n\n'
+                  'To create a token:\n'
+                  '1. Go to github.com → Settings → Developer settings\n'
+                  '2. Personal access tokens → Tokens (classic)\n'
+                  '3. Generate new token (no scopes needed)\n\n'
+                  'Leave empty to use unauthenticated requests (60/hour limit).',
+                  style: TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: controller,
+                  decoration: const InputDecoration(
+                    labelText: 'GitHub Token',
+                    hintText: 'ghp_xxxxxxxxxxxx',
+                    border: OutlineInputBorder(),
+                  ),
+                  obscureText: true,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              await GitHubUpdateService.instance.setGitHubToken(
+                controller.text.isEmpty ? null : controller.text,
+              );
+              if (dialogContext.mounted) {
+                Navigator.pop(dialogContext);
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      controller.text.isEmpty
+                          ? 'GitHub token removed'
+                          : 'GitHub token saved',
+                    ),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Check for updates from GitHub
+  Future<void> _checkForUpdates() async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    setState(() => _checkingForUpdates = true);
+
+    try {
+      final hasUpdate = await GitHubUpdateService.instance.checkForUpdates();
+
+      if (!mounted) return;
+      setState(() => _checkingForUpdates = false);
+
+      if (hasUpdate) {
+        _showUpdateDialog();
+      } else if (GitHubUpdateService.instance.error != null) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text('Error: ${GitHubUpdateService.instance.error}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      } else {
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(
+            content: Text('You are running the latest version'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _checkingForUpdates = false);
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text('Error checking for updates: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Show update available dialog
+  void _showUpdateDialog() {
+    final release = GitHubUpdateService.instance.latestRelease;
+    if (release == null) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Update Available'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Version ${release.version}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+            const SizedBox(height: 8),
+            Text('Released: ${release.formattedDate}'),
+            if (release.apkSize != null) Text('Size: ${release.formattedSize}'),
+            const SizedBox(height: 16),
+            const Text('Release Notes:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Container(
+              constraints: const BoxConstraints(maxHeight: 200),
+              child: SingleChildScrollView(
+                child: Text(
+                  release.body.isNotEmpty ? release.body : 'No release notes available',
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Later'),
+          ),
+          if (release.apkDownloadUrl != null)
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _downloadAndInstallUpdate();
+              },
+              icon: const Icon(Icons.download),
+              label: const Text('Download & Install'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Download and install update
+  Future<void> _downloadAndInstallUpdate() async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
+    // Check install permission first
+    const channel = MethodChannel('com.example.carsoc/update');
+    try {
+      final canInstall = await channel.invokeMethod<bool>('canRequestPackageInstalls') ?? false;
+      if (!canInstall) {
+        if (mounted) {
+          final shouldOpenSettings = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Permission Required'),
+              content: const Text(
+                'To install updates, you need to allow this app to install unknown apps. '
+                'Would you like to open settings?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Open Settings'),
+                ),
+              ],
+            ),
+          );
+
+          if (shouldOpenSettings == true) {
+            await channel.invokeMethod('openInstallPermissionSettings');
+          }
+        }
+        return;
+      }
+    } catch (e) {
+      debugPrint('Permission check failed: $e');
+    }
+
+    setState(() {
+      _downloadingUpdate = true;
+      _downloadProgress = 0.0;
+    });
+
+    try {
+      final filePath = await GitHubUpdateService.instance.downloadUpdate(
+        onProgress: (progress) {
+          if (mounted) {
+            setState(() => _downloadProgress = progress);
+          }
+        },
+      );
+
+      if (!mounted) return;
+      setState(() => _downloadingUpdate = false);
+
+      if (filePath != null) {
+        // Install the APK
+        try {
+          await channel.invokeMethod('installApk', {'filePath': filePath});
+        } catch (e) {
+          scaffoldMessenger.showSnackBar(
+            SnackBar(
+              content: Text('Failed to launch installer: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } else {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text('Download failed: ${GitHubUpdateService.instance.error ?? "Unknown error"}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _downloadingUpdate = false);
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text('Download error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 }

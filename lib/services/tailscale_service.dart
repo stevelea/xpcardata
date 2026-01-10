@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:android_intent_plus/flag.dart';
@@ -22,6 +23,22 @@ class TailscaleService {
   static const String _tailscaleReceiver = 'com.tailscale.ipn.IPNReceiver';
   static const String _connectAction = 'com.tailscale.ipn.CONNECT_VPN';
   static const String _disconnectAction = 'com.tailscale.ipn.DISCONNECT_VPN';
+
+  static const _platform = MethodChannel('com.example.carsoc/vpn_status');
+
+  // Cached VPN status
+  bool _isVpnActive = false;
+  DateTime? _lastCheck;
+  Timer? _statusTimer;
+
+  /// Stream controller for VPN status changes
+  final _statusController = StreamController<bool>.broadcast();
+
+  /// Stream of VPN status changes
+  Stream<bool> get statusStream => _statusController.stream;
+
+  /// Current VPN active status
+  bool get isVpnActive => _isVpnActive;
 
   TailscaleService._internal();
 
@@ -136,5 +153,56 @@ class TailscaleService {
       _logger.log('[Tailscale] Failed to open app: $e');
       return false;
     }
+  }
+
+  /// Check if any VPN is currently active using Android's ConnectivityManager
+  /// Note: This detects any VPN, not specifically Tailscale
+  Future<bool> checkVpnStatus() async {
+    if (!Platform.isAndroid) {
+      _logger.log('[Tailscale] VPN check: Not Android platform');
+      return false;
+    }
+
+    try {
+      final result = await _platform.invokeMethod<bool>('isVpnActive');
+      final isActive = result ?? false;
+
+      // Update cached status and notify listeners if changed
+      if (_isVpnActive != isActive) {
+        _isVpnActive = isActive;
+        _statusController.add(isActive);
+        _logger.log('[Tailscale] VPN status changed: ${isActive ? "ACTIVE" : "INACTIVE"}');
+      }
+
+      _lastCheck = DateTime.now();
+      return isActive;
+    } catch (e) {
+      _logger.log('[Tailscale] VPN status check failed: $e');
+      return false;
+    }
+  }
+
+  /// Start periodic VPN status monitoring
+  void startStatusMonitoring({Duration interval = const Duration(seconds: 10)}) {
+    stopStatusMonitoring();
+    _logger.log('[Tailscale] Starting VPN status monitoring (interval: ${interval.inSeconds}s)');
+
+    // Check immediately
+    checkVpnStatus();
+
+    // Then check periodically
+    _statusTimer = Timer.periodic(interval, (_) => checkVpnStatus());
+  }
+
+  /// Stop periodic VPN status monitoring
+  void stopStatusMonitoring() {
+    _statusTimer?.cancel();
+    _statusTimer = null;
+  }
+
+  /// Dispose resources
+  void dispose() {
+    stopStatusMonitoring();
+    _statusController.close();
   }
 }

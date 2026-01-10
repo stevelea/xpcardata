@@ -1,5 +1,13 @@
 import '../services/debug_logger.dart';
 
+/// PID polling priority levels
+/// High priority PIDs are polled every cycle (5 seconds)
+/// Low priority PIDs are polled less frequently (configurable interval)
+enum PIDPriority {
+  high,  // Poll every cycle (default)
+  low,   // Poll every N cycles (e.g., every 5 minutes for SOH)
+}
+
 /// OBD-II PID configuration model
 /// Allows users to define custom PIDs for their vehicle
 class OBDPIDConfig {
@@ -8,6 +16,8 @@ class OBDPIDConfig {
   final String description;
   final OBDPIDType type;
   final String? formula; // Custom formula for parsing (e.g., "A" or "(A*256+B)/4" or "A*0.001")
+  final String? header; // ECU header for this PID (e.g., "704" for BMS, "7E0" for VCU)
+  final PIDPriority priority; // Polling priority (high = every cycle, low = less frequent)
   final double Function(String response) parser;
 
   static final _logger = DebugLogger.instance;
@@ -18,6 +28,8 @@ class OBDPIDConfig {
     required this.description,
     required this.type,
     this.formula,
+    this.header,
+    this.priority = PIDPriority.high, // Default to high priority
     required this.parser,
   });
 
@@ -29,6 +41,8 @@ class OBDPIDConfig {
       'description': description,
       'type': type.toString(),
       'formula': formula,
+      'header': header,
+      'priority': priority.toString(),
     };
   }
 
@@ -39,6 +53,11 @@ class OBDPIDConfig {
       orElse: () => OBDPIDType.speed,
     );
     final formula = json['formula'] as String?;
+    final header = json['header'] as String?;
+    final priority = PIDPriority.values.firstWhere(
+      (e) => e.toString() == json['priority'],
+      orElse: () => PIDPriority.high, // Default to high if not specified
+    );
 
     return OBDPIDConfig(
       name: json['name'] as String,
@@ -46,6 +65,8 @@ class OBDPIDConfig {
       description: json['description'] as String,
       type: type,
       formula: formula,
+      header: header,
+      priority: priority,
       parser: formula != null && formula.isNotEmpty
           ? (response) => parseWithFormula(response, formula)
           : getParserForType(type),
@@ -74,11 +95,29 @@ class OBDPIDConfig {
       }
 
       // Check for OBD-II negative response (7F = negative response service ID)
-      // Format: 7F [service] [error code] - e.g., "7F 22 31" means "request out of range"
-      // After stripping CAN header, look for 7F in the response
-      if (parts.contains('7F')) {
-        _logger.log('[Parser] Negative response detected (7F): $response');
-        return double.nan; // Return NaN to indicate error/unsupported PID
+      // Format: [CAN ID][length]7F[service][error code] - e.g., "7E8 03 7F 22 31" means "request out of range"
+      // The 7F must be at the service byte position (after CAN ID and length byte)
+      // Don't match 7F that appears in data bytes (e.g., SOC value 027F = 63.9%)
+
+      // Check for 3-nibble CAN header to find the correct position
+      bool hasHeader = parts.length >= 7 && RegExp(r'^7[0-9A-F]{2}').hasMatch(parts.substring(0, 3));
+
+      // Negative response check: after CAN ID (3 chars) and length byte (2 chars), service byte is at position 5-6
+      // Format: 7E8 03 7F 22 31 -> position 5-6 should be "7F" for negative response
+      if (hasHeader && parts.length >= 7) {
+        final serviceByte = parts.substring(5, 7);
+        if (serviceByte == '7F') {
+          _logger.log('[Parser] Negative response detected (7F at service position): $response');
+          return double.nan; // Return NaN to indicate error/unsupported PID
+        }
+      } else if (!hasHeader && parts.length >= 4) {
+        // No CAN header: check if first byte after length is 7F
+        // Format: 03 7F 22 31
+        final serviceByte = parts.substring(2, 4);
+        if (serviceByte == '7F') {
+          _logger.log('[Parser] Negative response detected (7F): $response');
+          return double.nan;
+        }
       }
 
       // Handle CAN response format with 3-nibble ECU ID (e.g., "784056211090350")
@@ -294,6 +333,10 @@ class OBDPIDConfig {
         return _parseCumulativeAh;
       case OBDPIDType.cumulativeDischarge:
         return _parseCumulativeAh;
+      case OBDPIDType.cellVoltages:
+        return _parseCellVoltagesAvg;
+      case OBDPIDType.cellTemperatures:
+        return _parseCellTemperaturesAvg;
       case OBDPIDType.custom:
         return _parseCustom;
     }
@@ -359,6 +402,169 @@ class OBDPIDConfig {
     }
     return 0.0;
   }
+
+  /// Parse multi-frame cell voltages (PID 221122) and return average voltage
+  /// XPENG returns ~150 cell voltages in multi-frame ISO-TP response
+  /// Each byte is cell voltage: value * 0.02 + 2.0V (typical range 3.0-4.2V)
+  static double _parseCellVoltagesAvg(String response) {
+    final cellVoltages = parseCellVoltages(response);
+    if (cellVoltages.isEmpty) return 0.0;
+    final sum = cellVoltages.reduce((a, b) => a + b);
+    return sum / cellVoltages.length;
+  }
+
+  /// Parse multi-frame cell temperatures (PID 221123) and return average temp
+  /// Each byte is temperature: value - 40 (°C)
+  static double _parseCellTemperaturesAvg(String response) {
+    final cellTemps = parseCellTemperatures(response);
+    if (cellTemps.isEmpty) return 0.0;
+    final sum = cellTemps.reduce((a, b) => a + b);
+    return sum / cellTemps.length;
+  }
+
+  /// Parse multi-frame cell voltages and return list of all cell voltages (V)
+  /// Response format: Multi-frame ISO-TP with cell voltage bytes
+  /// Formula per cell: value * 0.02 + 2.0V
+  static List<double> parseCellVoltages(String response) {
+    final voltages = <double>[];
+    try {
+      // Remove spaces and get raw hex
+      String parts = response.replaceAll(' ', '').replaceAll('>', '').trim().toUpperCase();
+
+      // Multi-frame response contains multiple frames like:
+      // 78410E3621122C7C8C7 (first frame with header)
+      // 78421C8C7C8C7C8C8C8 (consecutive frames)
+      // Each frame has: [3-char CAN ID][frame type/seq][data bytes...]
+
+      // Split into frames (each starts with 784)
+      final frames = <String>[];
+      int idx = 0;
+      while (idx < parts.length) {
+        final frameStart = parts.indexOf('784', idx);
+        if (frameStart < 0) break;
+
+        // Find next frame or end
+        final nextFrame = parts.indexOf('784', frameStart + 3);
+        final frameEnd = nextFrame > 0 ? nextFrame : parts.length;
+        frames.add(parts.substring(frameStart, frameEnd));
+        idx = frameEnd;
+      }
+
+      if (frames.isEmpty) return voltages;
+
+      // Parse first frame (has length and PID echo)
+      // Format: 784[10][length][62][PID][data...]
+      if (frames.isNotEmpty && frames[0].length >= 13) {
+        final firstFrame = frames[0];
+        // Skip: 784 (3) + 10 (2) + length (2) + 62 (2) + 1122 (4) = 13 chars
+        final dataStart = 13;
+        for (int i = dataStart; i < firstFrame.length - 1; i += 2) {
+          final hexByte = firstFrame.substring(i, i + 2);
+          if (hexByte == 'FF') continue; // Skip padding
+          if (RegExp(r'^[0-9A-F]{2}$').hasMatch(hexByte)) {
+            final rawValue = int.parse(hexByte, radix: 16);
+            // Convert to voltage: value * 0.02 + 2.0V (gives ~3.7V for 0xB9=185)
+            final voltage = rawValue * 0.02 + 2.0;
+            if (voltage >= 2.5 && voltage <= 4.5) {
+              voltages.add(voltage);
+            }
+          }
+        }
+      }
+
+      // Parse consecutive frames
+      // Format: 784[2X][data...] where X is sequence number
+      for (int f = 1; f < frames.length; f++) {
+        final frame = frames[f];
+        if (frame.length < 5) continue;
+
+        // Skip: 784 (3) + 2X (2) = 5 chars
+        final dataStart = 5;
+        for (int i = dataStart; i < frame.length - 1; i += 2) {
+          final hexByte = frame.substring(i, i + 2);
+          if (hexByte == 'FF' || hexByte == '55') continue; // Skip padding
+          if (RegExp(r'^[0-9A-F]{2}$').hasMatch(hexByte)) {
+            final rawValue = int.parse(hexByte, radix: 16);
+            final voltage = rawValue * 0.02 + 2.0;
+            if (voltage >= 2.5 && voltage <= 4.5) {
+              voltages.add(voltage);
+            }
+          }
+        }
+      }
+
+      _logger.log('[Parser] Parsed ${voltages.length} cell voltages');
+    } catch (e) {
+      _logger.log('[Parser] Error parsing cell voltages: $e');
+    }
+    return voltages;
+  }
+
+  /// Parse multi-frame cell temperatures and return list of all temps (°C)
+  /// Response format: Multi-frame ISO-TP with temperature bytes
+  /// Formula per cell: value - 40 (°C)
+  static List<double> parseCellTemperatures(String response) {
+    final temps = <double>[];
+    try {
+      String parts = response.replaceAll(' ', '').replaceAll('>', '').trim().toUpperCase();
+
+      // Split into frames (each starts with 784)
+      final frames = <String>[];
+      int idx = 0;
+      while (idx < parts.length) {
+        final frameStart = parts.indexOf('784', idx);
+        if (frameStart < 0) break;
+
+        final nextFrame = parts.indexOf('784', frameStart + 3);
+        final frameEnd = nextFrame > 0 ? nextFrame : parts.length;
+        frames.add(parts.substring(frameStart, frameEnd));
+        idx = frameEnd;
+      }
+
+      if (frames.isEmpty) return temps;
+
+      // Parse first frame
+      if (frames.isNotEmpty && frames[0].length >= 13) {
+        final firstFrame = frames[0];
+        final dataStart = 13; // Skip header
+        for (int i = dataStart; i < firstFrame.length - 1; i += 2) {
+          final hexByte = firstFrame.substring(i, i + 2);
+          if (hexByte == 'FF') continue;
+          if (RegExp(r'^[0-9A-F]{2}$').hasMatch(hexByte)) {
+            final rawValue = int.parse(hexByte, radix: 16);
+            final temp = rawValue.toDouble() - 40.0;
+            if (temp >= -40 && temp <= 80) {
+              temps.add(temp);
+            }
+          }
+        }
+      }
+
+      // Parse consecutive frames
+      for (int f = 1; f < frames.length; f++) {
+        final frame = frames[f];
+        if (frame.length < 5) continue;
+
+        final dataStart = 5;
+        for (int i = dataStart; i < frame.length - 1; i += 2) {
+          final hexByte = frame.substring(i, i + 2);
+          if (hexByte == 'FF' || hexByte == '55') continue;
+          if (RegExp(r'^[0-9A-F]{2}$').hasMatch(hexByte)) {
+            final rawValue = int.parse(hexByte, radix: 16);
+            final temp = rawValue.toDouble() - 40.0;
+            if (temp >= -40 && temp <= 80) {
+              temps.add(temp);
+            }
+          }
+        }
+      }
+
+      _logger.log('[Parser] Parsed ${temps.length} cell temperatures');
+    } catch (e) {
+      _logger.log('[Parser] Error parsing cell temperatures: $e');
+    }
+    return temps;
+  }
 }
 
 enum OBDPIDType {
@@ -368,6 +574,8 @@ enum OBDPIDType {
   odometer,
   cumulativeCharge,
   cumulativeDischarge,
+  cellVoltages,    // Multi-frame: all individual cell voltages
+  cellTemperatures, // Multi-frame: all individual cell temperatures
   custom,
 }
 

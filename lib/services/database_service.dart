@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/vehicle_data.dart';
 import '../models/alert.dart';
+import '../models/charging_session.dart';
 
 /// Singleton service for SQLite database operations
 class DatabaseService {
@@ -22,8 +23,9 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _createDB,
+      onUpgrade: _upgradeDB,
     );
   }
 
@@ -70,6 +72,47 @@ class DatabaseService {
 
     await db.execute('''
       CREATE INDEX idx_alerts_unread ON alerts(isRead, timestamp DESC)
+    ''');
+
+    // Charging sessions table (version 2)
+    await _createChargingSessionsTable(db);
+  }
+
+  /// Upgrade database schema
+  Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await _createChargingSessionsTable(db);
+    }
+  }
+
+  /// Create charging sessions table
+  Future<void> _createChargingSessionsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS charging_sessions (
+        id TEXT PRIMARY KEY,
+        startTime INTEGER NOT NULL,
+        endTime INTEGER,
+        startCumulativeCharge REAL NOT NULL,
+        endCumulativeCharge REAL,
+        startSoc REAL NOT NULL,
+        endSoc REAL,
+        startOdometer REAL NOT NULL,
+        endOdometer REAL,
+        isActive INTEGER NOT NULL DEFAULT 0,
+        chargingType TEXT,
+        maxPowerKw REAL,
+        energyAddedKwh REAL,
+        distanceSinceLastCharge REAL,
+        consumptionKwhPer100km REAL,
+        previousSessionOdometer REAL,
+        locationName TEXT,
+        chargingCost REAL,
+        notes TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_charging_sessions_time ON charging_sessions(startTime DESC)
     ''');
   }
 
@@ -189,6 +232,111 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [alertId],
     );
+  }
+
+  // ==================== Charging Session Operations ====================
+
+  /// Insert or update a charging session
+  Future<void> insertChargingSession(ChargingSession session) async {
+    final db = await database;
+    await db.insert(
+      'charging_sessions',
+      session.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Get all charging sessions with optional limit
+  Future<List<ChargingSession>> getChargingSessions({int? limit}) async {
+    final db = await database;
+    final maps = await db.query(
+      'charging_sessions',
+      orderBy: 'startTime DESC',
+      limit: limit,
+    );
+    return maps.map((map) => ChargingSession.fromMap(map)).toList();
+  }
+
+  /// Get the most recent completed charging session
+  Future<ChargingSession?> getLastCompletedSession() async {
+    final db = await database;
+    final maps = await db.query(
+      'charging_sessions',
+      where: 'isActive = 0',
+      orderBy: 'endTime DESC',
+      limit: 1,
+    );
+    if (maps.isEmpty) return null;
+    return ChargingSession.fromMap(maps.first);
+  }
+
+  /// Get a charging session by ID
+  Future<ChargingSession?> getChargingSessionById(String id) async {
+    final db = await database;
+    final maps = await db.query(
+      'charging_sessions',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (maps.isEmpty) return null;
+    return ChargingSession.fromMap(maps.first);
+  }
+
+  /// Update a charging session (for manual edits)
+  Future<void> updateChargingSession(ChargingSession session) async {
+    final db = await database;
+    await db.update(
+      'charging_sessions',
+      session.toMap(),
+      where: 'id = ?',
+      whereArgs: [session.id],
+    );
+  }
+
+  /// Delete a charging session
+  Future<void> deleteChargingSession(String id) async {
+    final db = await database;
+    await db.delete(
+      'charging_sessions',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Get charging sessions count
+  Future<int> getChargingSessionsCount() async {
+    final db = await database;
+    final result = await db.rawQuery('SELECT COUNT(*) as count FROM charging_sessions');
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  /// Get total energy charged (kWh)
+  Future<double> getTotalEnergyCharged() async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT SUM(energyAddedKwh) as total FROM charging_sessions WHERE energyAddedKwh IS NOT NULL'
+    );
+    final value = result.first['total'];
+    if (value == null) return 0.0;
+    return (value as num).toDouble();
+  }
+
+  /// Get average consumption (kWh/100km)
+  Future<double?> getAverageConsumption() async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT AVG(consumptionKwhPer100km) as avg FROM charging_sessions WHERE consumptionKwhPer100km IS NOT NULL AND consumptionKwhPer100km > 0'
+    );
+    final value = result.first['avg'];
+    if (value == null) return null;
+    return (value as num).toDouble();
+  }
+
+  /// Clear all charging sessions
+  Future<void> clearAllChargingSessions() async {
+    final db = await database;
+    await db.delete('charging_sessions');
   }
 
   // ==================== Data Maintenance ====================

@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vehicle_data.dart';
 import '../models/alert.dart';
 import '../services/database_service.dart';
@@ -6,6 +7,32 @@ import '../services/car_info_service.dart';
 import '../services/obd_service.dart';
 import '../services/data_source_manager.dart';
 import 'mqtt_provider.dart';
+
+// ==================== Vehicle Settings ====================
+
+/// Battery capacities by vehicle model (kWh)
+const Map<String, double> vehicleBatteryCapacities = {
+  '24LR': 87.5,   // 2024 Long Range / AWD
+  '24SR': 66.0,   // 2024 Standard Range
+  '25LR': 80.8,   // 2025 Long Range / AWD
+  '25SR': 68.5,   // 2025 Standard Range
+};
+
+/// Vehicle model provider - loads from SharedPreferences
+final vehicleModelProvider = FutureProvider<String>((ref) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('vehicle_model') ?? '24LR';
+  } catch (e) {
+    return '24LR';
+  }
+});
+
+/// Battery capacity provider based on vehicle model
+final batteryCapacityProvider = FutureProvider<double>((ref) async {
+  final model = await ref.watch(vehicleModelProvider.future);
+  return vehicleBatteryCapacities[model] ?? 87.5;
+});
 
 // ==================== Service Providers ====================
 

@@ -419,6 +419,10 @@ class _OBDPIDConfigScreenState extends State<OBDPIDConfigScreen> {
         return 'Cumulative Charge';
       case OBDPIDType.cumulativeDischarge:
         return 'Cumulative Discharge';
+      case OBDPIDType.cellVoltages:
+        return 'Cell Voltages';
+      case OBDPIDType.cellTemperatures:
+        return 'Cell Temperatures';
       case OBDPIDType.custom:
         return 'Custom';
     }

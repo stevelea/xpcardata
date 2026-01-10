@@ -1,18 +1,25 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vehicle_data.dart';
+import '../models/obd_pid_config.dart';
 import 'car_info_service.dart';
 import 'obd_service.dart';
+import 'obd_proxy_service.dart';
 import 'database_service.dart';
 import 'mqtt_service.dart';
 import 'abrp_service.dart';
 import 'car_app_bridge.dart';
 import 'charging_session_service.dart';
+import 'location_service.dart';
+import 'fleet_analytics_service.dart';
 import 'debug_logger.dart';
 
 /// Data source types available
 enum DataSource {
   carInfo,  // Android Automotive CarInfo API (primary for AAOS)
   obd,      // OBD-II Bluetooth adapter
+  proxy,    // Intercepted data from OBD proxy (external app querying)
 }
 
 /// Manages vehicle data collection from multiple sources with intelligent fallback
@@ -21,11 +28,21 @@ class DataSourceManager {
   final OBDService _obdService;
   final MqttService? _mqttService;
   final AbrpService _abrpService = AbrpService();
+  final LocationService _locationService = LocationService.instance;
+  final FleetAnalyticsService _fleetAnalyticsService = FleetAnalyticsService.instance;
   late final ChargingSessionService _chargingSessionService;
   final _logger = DebugLogger.instance;
 
   DataSource? _currentSource;
   StreamSubscription<VehicleData>? _dataSubscription;
+  StreamSubscription<dynamic>? _chargingSessionSubscription;
+
+  // Proxy interception state
+  VehicleData? _proxyVehicleData;
+  Timer? _proxyPublishTimer;
+
+  // Location tracking
+  bool _locationEnabled = false;
 
   final StreamController<VehicleData> _dataController =
       StreamController<VehicleData>.broadcast();
@@ -41,6 +58,20 @@ class DataSourceManager {
         _obdService = obdService ?? OBDService(),
         _mqttService = mqttService {
     _chargingSessionService = ChargingSessionService(mqttService: mqttService);
+    _setupProxyInterception();
+    _setupChargingSessionListener();
+  }
+
+  /// Setup listener for charging session completion to send to fleet analytics
+  void _setupChargingSessionListener() {
+    _chargingSessionSubscription = _chargingSessionService.sessionStream.listen(
+      (session) {
+        // Record completed charging session to fleet analytics
+        if (_fleetAnalyticsService.isEnabled && session.endTime != null) {
+          _fleetAnalyticsService.recordChargingSession(session);
+        }
+      },
+    );
   }
 
   /// Get ABRP service for configuration
@@ -48,6 +79,12 @@ class DataSourceManager {
 
   /// Get charging session service for monitoring
   ChargingSessionService get chargingSessionService => _chargingSessionService;
+
+  /// Get location service for configuration
+  LocationService get locationService => _locationService;
+
+  /// Check if location tracking is enabled
+  bool get isLocationEnabled => _locationEnabled;
 
   /// Stream of vehicle data from current active source
   Stream<VehicleData> get vehicleDataStream => _dataController.stream;
@@ -67,9 +104,157 @@ class DataSourceManager {
   /// Get OBD service instance
   OBDService get obdService => _obdService;
 
+  /// Setup proxy interception for PID data
+  void _setupProxyInterception() {
+    final proxyService = OBDProxyService.instance;
+
+    // Set PIDs to intercept from the OBD service's configured PIDs
+    proxyService.onPIDIntercepted = _handleInterceptedPID;
+
+    // Monitor proxy status changes
+    proxyService.onStatusChanged = (isRunning, clientAddress) {
+      if (isRunning && clientAddress != null) {
+        // Proxy client connected - switch to proxy source
+        _logger.log('[DataSourceManager] Proxy client connected, switching to proxy source');
+        _activateProxySource();
+      } else if (isRunning && clientAddress == null && _currentSource == DataSource.proxy) {
+        // Proxy client disconnected - switch back to OBD if connected
+        _logger.log('[DataSourceManager] Proxy client disconnected');
+        if (_obdService.isConnected) {
+          _activateDataSource(DataSource.obd);
+        }
+      }
+    };
+  }
+
+  /// Configure PIDs for proxy interception (call after loading vehicle profile)
+  void configureProxyInterception(List<OBDPIDConfig> pids) {
+    final proxyService = OBDProxyService.instance;
+    proxyService.setInterceptPIDs(pids);
+    _logger.log('[DataSourceManager] Configured ${pids.length} PIDs for proxy interception');
+  }
+
+  /// Handle intercepted PID data from proxy
+  void _handleInterceptedPID(String pidName, double value, String rawResponse) {
+    _logger.log('[DataSourceManager] Intercepted PID: $pidName = $value');
+
+    // Initialize proxy vehicle data if needed
+    _proxyVehicleData ??= VehicleData(timestamp: DateTime.now());
+
+    // Update the appropriate field based on PID name
+    final nameLower = pidName.toLowerCase();
+    final nameUpper = pidName.toUpperCase();
+
+    if (nameLower == 'soc' || nameLower.contains('state of charge')) {
+      _proxyVehicleData = _proxyVehicleData!.copyWith(
+        stateOfCharge: value,
+        timestamp: DateTime.now(),
+      );
+    } else if (nameLower == 'soh' || nameLower.contains('health')) {
+      _proxyVehicleData = _proxyVehicleData!.copyWith(
+        stateOfHealth: value,
+        timestamp: DateTime.now(),
+      );
+    } else if (nameUpper == 'HV_V' || nameLower.contains('voltage')) {
+      _proxyVehicleData = _proxyVehicleData!.copyWith(
+        batteryVoltage: value,
+        timestamp: DateTime.now(),
+      );
+    } else if (nameUpper == 'HV_A' || nameLower.contains('current')) {
+      _proxyVehicleData = _proxyVehicleData!.copyWith(
+        batteryCurrent: value,
+        timestamp: DateTime.now(),
+      );
+    } else if (nameUpper == 'HV_T_MAX' || (nameLower.contains('temp') && nameLower.contains('max'))) {
+      _proxyVehicleData = _proxyVehicleData!.copyWith(
+        batteryTemperature: value,
+        timestamp: DateTime.now(),
+      );
+    } else if (nameLower == 'speed') {
+      _proxyVehicleData = _proxyVehicleData!.copyWith(
+        speed: value,
+        timestamp: DateTime.now(),
+      );
+    } else if (nameLower == 'odometer') {
+      _proxyVehicleData = _proxyVehicleData!.copyWith(
+        odometer: value,
+        timestamp: DateTime.now(),
+      );
+    } else if (nameUpper == 'RANGE_EST' || nameLower.contains('range')) {
+      _proxyVehicleData = _proxyVehicleData!.copyWith(
+        range: value,
+        timestamp: DateTime.now(),
+      );
+    } else if (nameLower == 'cumulative charge') {
+      _proxyVehicleData = _proxyVehicleData!.copyWith(
+        cumulativeCharge: value,
+        timestamp: DateTime.now(),
+      );
+    } else if (nameLower == 'cumulative discharge') {
+      _proxyVehicleData = _proxyVehicleData!.copyWith(
+        cumulativeDischarge: value,
+        timestamp: DateTime.now(),
+      );
+    } else {
+      // Store in additional properties
+      final additionalProps = Map<String, dynamic>.from(
+        _proxyVehicleData!.additionalProperties ?? {},
+      );
+      additionalProps[pidName] = value;
+      _proxyVehicleData = _proxyVehicleData!.copyWith(
+        additionalProperties: additionalProps,
+        timestamp: DateTime.now(),
+      );
+    }
+
+    // Schedule a publish to batch updates
+    _scheduleProxyPublish();
+  }
+
+  /// Schedule proxy data publish (batches rapid updates)
+  void _scheduleProxyPublish() {
+    _proxyPublishTimer?.cancel();
+    _proxyPublishTimer = Timer(const Duration(milliseconds: 500), () {
+      if (_proxyVehicleData != null && _currentSource == DataSource.proxy) {
+        _publishProxyData(_proxyVehicleData!);
+      }
+    });
+  }
+
+  /// Publish proxy-intercepted data
+  void _publishProxyData(VehicleData data) {
+    final enrichedData = _enrichWithLocation(data);
+    _dataController.add(enrichedData);
+    _saveData(enrichedData);
+    _publishToMqtt(enrichedData);
+    _publishToAbrp(enrichedData);
+    _publishToFleetAnalytics(enrichedData);
+    _sendToAndroidAuto(enrichedData);
+    _processChargingData(enrichedData);
+  }
+
+  /// Activate proxy data source
+  void _activateProxySource() {
+    _logger.log('[DataSourceManager] Activating proxy data source');
+
+    // Pause OBD polling if active
+    if (_currentSource == DataSource.obd) {
+      _obdService.pausePolling();
+    }
+
+    _currentSource = DataSource.proxy;
+    _sourceController.add(DataSource.proxy);
+
+    // Initialize with empty data
+    _proxyVehicleData = VehicleData(timestamp: DateTime.now());
+  }
+
   /// Initialize and determine best data source
   Future<DataSource?> initialize() async {
     _logger.log('[DataSourceManager] Initializing...');
+
+    // Load PIDs for proxy interception
+    await _loadPIDsForProxyInterception();
 
     // Auto-select best available source
     _logger.log('[DataSourceManager] Auto-selecting best data source...');
@@ -83,6 +268,30 @@ class DataSourceManager {
     }
 
     return selectedSource;
+  }
+
+  /// Load PIDs from SharedPreferences and configure proxy interception
+  Future<void> _loadPIDsForProxyInterception() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final pidsJson = prefs.getString('custom_pids');
+
+      if (pidsJson != null && pidsJson.isNotEmpty) {
+        final List<dynamic> pidList = json.decode(pidsJson);
+        final pids = pidList
+            .map((p) => OBDPIDConfig.fromJson(p as Map<String, dynamic>))
+            .toList();
+
+        if (pids.isNotEmpty) {
+          configureProxyInterception(pids);
+          _logger.log('[DataSourceManager] Loaded ${pids.length} PIDs for proxy interception');
+        }
+      } else {
+        _logger.log('[DataSourceManager] No PIDs found in SharedPreferences for proxy interception');
+      }
+    } catch (e) {
+      _logger.log('[DataSourceManager] Error loading PIDs for proxy interception: $e');
+    }
   }
 
   /// Select best available data source
@@ -133,7 +342,12 @@ class DataSourceManager {
         break;
       case DataSource.obd:
         _logger.log('[DataSourceManager] Starting OBD-II data stream...');
+        _obdService.resumePolling();
         _startObdSource();
+        break;
+      case DataSource.proxy:
+        // Proxy source is activated separately via _activateProxySource
+        _logger.log('[DataSourceManager] Proxy source activated');
         break;
     }
   }
@@ -142,12 +356,14 @@ class DataSourceManager {
   Future<void> _startCarInfoSource() async {
     _dataSubscription = _carInfoService.vehicleDataStream.listen(
       (data) {
-        _dataController.add(data);
-        _saveData(data);
-        _publishToMqtt(data);
-        _publishToAbrp(data);
-        _sendToAndroidAuto(data);
-        _processChargingData(data);
+        final enrichedData = _enrichWithLocation(data);
+        _dataController.add(enrichedData);
+        _saveData(enrichedData);
+        _publishToMqtt(enrichedData);
+        _publishToAbrp(enrichedData);
+        _publishToFleetAnalytics(enrichedData);
+        _sendToAndroidAuto(enrichedData);
+        _processChargingData(enrichedData);
       },
       onError: (error) {
         // On error, try to fall back to another source
@@ -160,12 +376,14 @@ class DataSourceManager {
   void _startObdSource() {
     _dataSubscription = _obdService.vehicleDataStream.listen(
       (data) {
-        _dataController.add(data);
-        _saveData(data);
-        _publishToMqtt(data);
-        _publishToAbrp(data);
-        _sendToAndroidAuto(data);
-        _processChargingData(data);
+        final enrichedData = _enrichWithLocation(data);
+        _dataController.add(enrichedData);
+        _saveData(enrichedData);
+        _publishToMqtt(enrichedData);
+        _publishToAbrp(enrichedData);
+        _publishToFleetAnalytics(enrichedData);
+        _sendToAndroidAuto(enrichedData);
+        _processChargingData(enrichedData);
       },
       onError: (error) {
         _logger.log('[DataSourceManager] OBD-II error: $error');
@@ -185,6 +403,14 @@ class DataSourceManager {
         break;
       case DataSource.obd:
         // OBD service continues running in background
+        break;
+      case DataSource.proxy:
+        _proxyPublishTimer?.cancel();
+        _proxyVehicleData = null;
+        // Resume OBD polling if connected
+        if (_obdService.isConnected) {
+          _obdService.resumePolling();
+        }
         break;
       case null:
         break;
@@ -209,6 +435,12 @@ class DataSourceManager {
         // OBD failed, try CarInfo if available
         if (_carInfoService.isAvailable) {
           fallbackSource = DataSource.carInfo;
+        }
+        break;
+      case DataSource.proxy:
+        // Proxy failed, try OBD if connected
+        if (_obdService.isConnected) {
+          fallbackSource = DataSource.obd;
         }
         break;
     }
@@ -275,6 +507,19 @@ class DataSourceManager {
     _chargingSessionService.processVehicleData(data);
   }
 
+  /// Publish anonymous metrics to fleet analytics if enabled
+  void _publishToFleetAnalytics(VehicleData data) {
+    if (_fleetAnalyticsService.isEnabled) {
+      // Record battery metrics (rate-limited internally)
+      _fleetAnalyticsService.recordBatteryMetrics(data);
+
+      // Record driving metrics if moving (rate-limited internally)
+      if (data.speed != null && data.speed! > 0) {
+        _fleetAnalyticsService.recordDrivingMetrics(data);
+      }
+    }
+  }
+
   /// Manually switch to a specific data source
   Future<bool> switchToSource(DataSource source) async {
     try {
@@ -289,6 +534,11 @@ class DataSourceManager {
         case DataSource.obd:
           // Check if OBD is connected
           if (!_obdService.isConnected) return false;
+          break;
+        case DataSource.proxy:
+          // Proxy source requires proxy service running with client
+          final proxyService = OBDProxyService.instance;
+          if (!proxyService.isRunning || !proxyService.hasClient) return false;
           break;
       }
 
@@ -313,6 +563,12 @@ class DataSourceManager {
       sources.add(DataSource.obd);
     }
 
+    // Check proxy availability
+    final proxyService = OBDProxyService.instance;
+    if (proxyService.isRunning && proxyService.hasClient) {
+      sources.add(DataSource.proxy);
+    }
+
     return sources;
   }
 
@@ -323,6 +579,8 @@ class DataSourceManager {
         return 'Android CarInfo API';
       case DataSource.obd:
         return 'OBD-II Adapter';
+      case DataSource.proxy:
+        return 'OBD Proxy';
     }
   }
 
@@ -333,6 +591,8 @@ class DataSourceManager {
         return 'Direct access to vehicle data via Android Automotive OS';
       case DataSource.obd:
         return 'Vehicle data from Bluetooth OBD-II adapter';
+      case DataSource.proxy:
+        return 'Intercepted data from external OBD app via proxy';
     }
   }
 
@@ -345,9 +605,48 @@ class DataSourceManager {
     _abrpService.setUpdateInterval(seconds);
   }
 
+  /// Enable or disable location tracking
+  Future<bool> setLocationEnabled(bool enabled) async {
+    if (enabled) {
+      final initialized = await _locationService.initialize();
+      if (initialized) {
+        await _locationService.startTracking(intervalSeconds: 10, distanceMeters: 10);
+        _locationEnabled = true;
+        _logger.log('[DataSourceManager] Location tracking enabled');
+        return true;
+      } else {
+        _logger.log('[DataSourceManager] Failed to initialize location service');
+        return false;
+      }
+    } else {
+      await _locationService.stopTracking();
+      _locationEnabled = false;
+      _logger.log('[DataSourceManager] Location tracking disabled');
+      return true;
+    }
+  }
+
+  /// Enrich vehicle data with current location
+  VehicleData _enrichWithLocation(VehicleData data) {
+    final location = _locationService.lastLocation;
+    if (location != null && _locationEnabled) {
+      return data.copyWith(
+        latitude: location.latitude,
+        longitude: location.longitude,
+        altitude: location.altitude,
+        gpsSpeed: location.speedKmh,
+        heading: location.heading,
+      );
+    }
+    return data;
+  }
+
   /// Dispose and cleanup
   void dispose() {
     _stopCurrentSource();
+    _proxyPublishTimer?.cancel();
+    _chargingSessionSubscription?.cancel();
+    _locationService.stopTracking();
     _carInfoService.dispose();
     _obdService.dispose();
     _chargingSessionService.dispose();

@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-/// Model representing a charging session with start/end data
+/// Model representing a charging session with start/end data and consumption tracking
 class ChargingSession {
   final String id;
   final DateTime startTime;
@@ -12,6 +12,19 @@ class ChargingSession {
   final double startOdometer; // km at start
   final double? endOdometer; // km at end (should be same if charging)
   final bool isActive; // true if session is ongoing
+  final String? chargingType; // 'ac', 'dc', or 'unknown'
+  final double? maxPowerKw; // Maximum power during session (kW)
+
+  // New fields for consumption tracking
+  final double? energyAddedKwh; // Energy added in kWh (calculated from Ah * avg voltage)
+  final double? distanceSinceLastCharge; // km driven since last charge
+  final double? consumptionKwhPer100km; // Calculated consumption
+  final double? previousSessionOdometer; // Odometer at end of previous charge
+
+  // Manual/editable fields
+  final String? locationName; // User-entered location name
+  final double? chargingCost; // Cost in user's currency
+  final String? notes; // User notes
 
   ChargingSession({
     required this.id,
@@ -24,6 +37,15 @@ class ChargingSession {
     required this.startOdometer,
     this.endOdometer,
     this.isActive = true,
+    this.chargingType,
+    this.maxPowerKw,
+    this.energyAddedKwh,
+    this.distanceSinceLastCharge,
+    this.consumptionKwhPer100km,
+    this.previousSessionOdometer,
+    this.locationName,
+    this.chargingCost,
+    this.notes,
   });
 
   /// Calculate energy added during this session (Ah)
@@ -58,7 +80,16 @@ class ChargingSession {
     required double endCumulativeCharge,
     required double endSoc,
     double? endOdometer,
+    double? averageVoltage,
+    double? previousOdometer,
   }) {
+    final energyAh = endCumulativeCharge - startCumulativeCharge;
+    final energyKwh = averageVoltage != null ? (energyAh * averageVoltage) / 1000.0 : null;
+    final distance = previousOdometer != null ? startOdometer - previousOdometer : null;
+    final consumption = (distance != null && distance > 0 && energyKwh != null)
+        ? (energyKwh / distance) * 100.0
+        : null;
+
     return ChargingSession(
       id: id,
       startTime: startTime,
@@ -70,6 +101,45 @@ class ChargingSession {
       startOdometer: startOdometer,
       endOdometer: endOdometer ?? startOdometer,
       isActive: false,
+      chargingType: chargingType,
+      maxPowerKw: maxPowerKw,
+      energyAddedKwh: energyKwh,
+      distanceSinceLastCharge: distance,
+      consumptionKwhPer100km: consumption,
+      previousSessionOdometer: previousOdometer,
+      locationName: locationName,
+      chargingCost: chargingCost,
+      notes: notes,
+    );
+  }
+
+  /// Create a copy with updated manual fields
+  ChargingSession copyWith({
+    String? locationName,
+    double? chargingCost,
+    String? notes,
+    double? energyAddedKwh,
+  }) {
+    return ChargingSession(
+      id: id,
+      startTime: startTime,
+      endTime: endTime,
+      startCumulativeCharge: startCumulativeCharge,
+      endCumulativeCharge: endCumulativeCharge,
+      startSoc: startSoc,
+      endSoc: endSoc,
+      startOdometer: startOdometer,
+      endOdometer: endOdometer,
+      isActive: isActive,
+      chargingType: chargingType,
+      maxPowerKw: maxPowerKw,
+      energyAddedKwh: energyAddedKwh ?? this.energyAddedKwh,
+      distanceSinceLastCharge: distanceSinceLastCharge,
+      consumptionKwhPer100km: consumptionKwhPer100km,
+      previousSessionOdometer: previousSessionOdometer,
+      locationName: locationName ?? this.locationName,
+      chargingCost: chargingCost ?? this.chargingCost,
+      notes: notes ?? this.notes,
     );
   }
 
@@ -82,6 +152,7 @@ class ChargingSession {
       'startCumulativeCharge': startCumulativeCharge,
       'endCumulativeCharge': endCumulativeCharge,
       'energyAddedAh': energyAddedAh,
+      'energyAddedKwh': energyAddedKwh,
       'startSoc': startSoc,
       'endSoc': endSoc,
       'socGained': socGained,
@@ -90,6 +161,14 @@ class ChargingSession {
       'durationSeconds': duration?.inSeconds,
       'averageChargingRateAh': averageChargingRateAh,
       'isActive': isActive,
+      'chargingType': chargingType,
+      'maxPowerKw': maxPowerKw,
+      'distanceSinceLastCharge': distanceSinceLastCharge,
+      'consumptionKwhPer100km': consumptionKwhPer100km,
+      'previousSessionOdometer': previousSessionOdometer,
+      'locationName': locationName,
+      'chargingCost': chargingCost,
+      'notes': notes,
     };
   }
 
@@ -111,6 +190,15 @@ class ChargingSession {
       startOdometer: (json['startOdometer'] as num).toDouble(),
       endOdometer: (json['endOdometer'] as num?)?.toDouble(),
       isActive: json['isActive'] as bool? ?? false,
+      chargingType: json['chargingType'] as String?,
+      maxPowerKw: (json['maxPowerKw'] as num?)?.toDouble(),
+      energyAddedKwh: (json['energyAddedKwh'] as num?)?.toDouble(),
+      distanceSinceLastCharge: (json['distanceSinceLastCharge'] as num?)?.toDouble(),
+      consumptionKwhPer100km: (json['consumptionKwhPer100km'] as num?)?.toDouble(),
+      previousSessionOdometer: (json['previousSessionOdometer'] as num?)?.toDouble(),
+      locationName: json['locationName'] as String?,
+      chargingCost: (json['chargingCost'] as num?)?.toDouble(),
+      notes: json['notes'] as String?,
     );
   }
 
@@ -132,6 +220,15 @@ class ChargingSession {
       'startOdometer': startOdometer,
       'endOdometer': endOdometer,
       'isActive': isActive ? 1 : 0,
+      'chargingType': chargingType,
+      'maxPowerKw': maxPowerKw,
+      'energyAddedKwh': energyAddedKwh,
+      'distanceSinceLastCharge': distanceSinceLastCharge,
+      'consumptionKwhPer100km': consumptionKwhPer100km,
+      'previousSessionOdometer': previousSessionOdometer,
+      'locationName': locationName,
+      'chargingCost': chargingCost,
+      'notes': notes,
     };
   }
 
@@ -143,21 +240,32 @@ class ChargingSession {
       endTime: map['endTime'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['endTime'] as int)
           : null,
-      startCumulativeCharge: map['startCumulativeCharge'] as double,
-      endCumulativeCharge: map['endCumulativeCharge'] as double?,
-      startSoc: map['startSoc'] as double,
-      endSoc: map['endSoc'] as double?,
-      startOdometer: map['startOdometer'] as double,
-      endOdometer: map['endOdometer'] as double?,
+      startCumulativeCharge: (map['startCumulativeCharge'] as num).toDouble(),
+      endCumulativeCharge: (map['endCumulativeCharge'] as num?)?.toDouble(),
+      startSoc: (map['startSoc'] as num).toDouble(),
+      endSoc: (map['endSoc'] as num?)?.toDouble(),
+      startOdometer: (map['startOdometer'] as num).toDouble(),
+      endOdometer: (map['endOdometer'] as num?)?.toDouble(),
       isActive: (map['isActive'] as int) == 1,
+      chargingType: map['chargingType'] as String?,
+      maxPowerKw: (map['maxPowerKw'] as num?)?.toDouble(),
+      energyAddedKwh: (map['energyAddedKwh'] as num?)?.toDouble(),
+      distanceSinceLastCharge: (map['distanceSinceLastCharge'] as num?)?.toDouble(),
+      consumptionKwhPer100km: (map['consumptionKwhPer100km'] as num?)?.toDouble(),
+      previousSessionOdometer: (map['previousSessionOdometer'] as num?)?.toDouble(),
+      locationName: map['locationName'] as String?,
+      chargingCost: (map['chargingCost'] as num?)?.toDouble(),
+      notes: map['notes'] as String?,
     );
   }
 
   @override
   String toString() {
-    return 'ChargingSession(id: $id, start: $startTime, end: $endTime, '
+    return 'ChargingSession(id: $id, type: ${chargingType ?? "unknown"}, '
+        'start: $startTime, end: $endTime, '
         'energyAdded: ${energyAddedAh?.toStringAsFixed(2)} Ah, '
         'SOC: $startSoc% -> ${endSoc ?? "ongoing"}%, '
+        'maxPower: ${maxPowerKw?.toStringAsFixed(1)} kW, '
         'active: $isActive)';
   }
 }

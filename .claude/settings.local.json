@@ -37,7 +37,12 @@
       "Bash(xargs cat:*)",
       "Bash(ls:*)",
       "Bash(/Users/stevelea/flutter/bin/flutter:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(wc:*)",
+      "Bash(pip3 install:*)",
+      "Bash(/Users/stevelea/Library/Android/sdk/build-tools/*/aapt)",
+      "Bash(dump badging:*)",
+      "Bash(/Users/stevelea/Library/Android/sdk/build-tools/36.1.0/aapt:*)"
     ]
   }
 }

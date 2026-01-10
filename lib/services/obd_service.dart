@@ -5,8 +5,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/vehicle_data.dart';
 import '../models/obd_pid_config.dart';
+import '../models/local_vehicle_profiles.dart';
 import 'debug_logger.dart';
 import 'native_bluetooth_service.dart';
+
+/// Current PID profile version - increment when formulas change
+const int _pidProfileVersion = 3; // v3: Added priority-based polling
 
 /// Service for accessing vehicle data via OBD-II Bluetooth adapter
 /// Works with ELM327-compatible adapters
@@ -31,10 +35,60 @@ class OBDService {
   List<OBDPIDConfig> _customPIDs = [];
   final StringBuffer _receiveBuffer = StringBuffer();
   final bool _enableTrafficLogging = true; // Enable OBD traffic logging
+  String? _currentEcuHeader; // Track actual ELM327 header state across polls
+
+  // Priority-based polling: Low priority PIDs are polled every N cycles
+  int _pollCycleCount = 0;
+  static const int _lowPriorityInterval = 60; // Poll low priority every 60 cycles (5 sec * 60 = 5 minutes)
+  final Map<String, double> _lastLowPriorityValues = {}; // Cache last values for low priority PIDs
 
   Stream<VehicleData> get vehicleDataStream => _dataController.stream;
   bool get isConnected => _isConnected;
   String? get connectedDevice => _connectedDeviceAddress;
+
+  /// Get current PID configurations for UI display (priority indicators, etc.)
+  List<OBDPIDConfig> get customPIDs => List.unmodifiable(_customPIDs);
+
+  /// Apply cached value for low priority PID that was skipped this cycle
+  void _applyCachedValue(
+    OBDPIDConfig pidConfig,
+    double value,
+    Map<String, dynamic> additionalData, {
+    required void Function(double) soh,
+    required void Function(double) odometer,
+    required void Function(double) cumulativeCharge,
+    required void Function(double) cumulativeDischarge,
+  }) {
+    final nameLower = pidConfig.name.toLowerCase();
+
+    switch (pidConfig.type) {
+      case OBDPIDType.odometer:
+        odometer(value);
+        break;
+      case OBDPIDType.cumulativeCharge:
+        cumulativeCharge(value);
+        break;
+      case OBDPIDType.cumulativeDischarge:
+        cumulativeDischarge(value);
+        break;
+      case OBDPIDType.cellVoltages:
+        additionalData['cellVoltageAvg'] = value;
+        break;
+      case OBDPIDType.cellTemperatures:
+        additionalData['cellTempAvg'] = value;
+        break;
+      case OBDPIDType.custom:
+        if (nameLower.contains('soh') || nameLower.contains('health')) {
+          soh(value);
+        } else {
+          additionalData[pidConfig.name] = value;
+        }
+        break;
+      default:
+        additionalData[pidConfig.name] = value;
+        break;
+    }
+  }
   bool get isPollingPaused => _pollingPaused;
 
   /// Pause OBD polling (e.g., when proxy client is connected)
@@ -55,7 +109,14 @@ class OBDService {
 
   /// Schedule auto-reconnect after connection loss
   void _scheduleReconnect() {
-    if (!_autoReconnectEnabled || _isReconnecting || _connectedDeviceAddress == null) {
+    if (!_autoReconnectEnabled || _isReconnecting) {
+      return;
+    }
+
+    // Save address before it gets cleared by failed connect attempts
+    final addressToReconnect = _connectedDeviceAddress;
+    if (addressToReconnect == null) {
+      _logger.log('[OBDService] No device address for reconnect');
       return;
     }
 
@@ -70,19 +131,25 @@ class OBDService {
 
     // Exponential backoff: 2s, 4s, 8s, 16s, 32s
     final delay = Duration(seconds: 2 << (_reconnectAttempts - 1));
-    _logger.log('[OBDService] Scheduling reconnect attempt $_reconnectAttempts/$_maxReconnectAttempts in ${delay.inSeconds}s');
+    _logger.log('[OBDService] Scheduling reconnect attempt $_reconnectAttempts/$_maxReconnectAttempts in ${delay.inSeconds}s to $addressToReconnect');
 
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(delay, () async {
-      if (_connectedDeviceAddress != null && !_isConnected) {
-        _logger.log('[OBDService] Attempting auto-reconnect to $_connectedDeviceAddress');
-        final success = await connect(_connectedDeviceAddress!);
+      if (!_isConnected) {
+        _logger.log('[OBDService] Attempting auto-reconnect to $addressToReconnect');
+        // Temporarily restore address so connect() can use it
+        _connectedDeviceAddress = addressToReconnect;
+        final success = await connect(addressToReconnect);
         if (success) {
           _logger.log('[OBDService] Auto-reconnect successful');
           _reconnectAttempts = 0;
         } else {
           _logger.log('[OBDService] Auto-reconnect failed');
+          // Restore address for next retry (connect clears it on failure)
+          _connectedDeviceAddress = addressToReconnect;
+          _isReconnecting = false;
           _scheduleReconnect(); // Try again
+          return;
         }
       }
       _isReconnecting = false;
@@ -93,28 +160,48 @@ class OBDService {
   Future<bool> autoConnect() async {
     String? lastAddress;
 
-    // Try hardcoded file path first (most reliable - doesn't need path_provider)
-    const hardcodedPath = '/data/data/com.example.carsoc/files/app_settings.json';
+    // Try dedicated OBD address file first (simplest, most reliable)
+    const obdAddressFile = '/data/data/com.example.carsoc/files/last_obd_device.txt';
     try {
-      final file = File(hardcodedPath);
+      final file = File(obdAddressFile);
       if (await file.exists()) {
-        final content = await file.readAsString();
-        final Map<String, dynamic> settings = jsonDecode(content);
-        lastAddress = settings['last_obd_address'] as String?;
-        _logger.log('[OBDService] Hardcoded path last_obd_address: $lastAddress');
+        lastAddress = (await file.readAsString()).trim();
+        if (lastAddress.isNotEmpty) {
+          _logger.log('[OBDService] Loaded OBD address from dedicated file: $lastAddress');
+        } else {
+          lastAddress = null;
+        }
       }
     } catch (e) {
-      _logger.log('[OBDService] Hardcoded path read failed: $e');
+      _logger.log('[OBDService] Dedicated OBD file read failed: $e');
     }
 
-    // Try SharedPreferences with retry if hardcoded path failed
+    // Try hardcoded JSON file path as backup
+    if (lastAddress == null || lastAddress.isEmpty) {
+      const hardcodedPath = '/data/data/com.example.carsoc/files/app_settings.json';
+      try {
+        final file = File(hardcodedPath);
+        if (await file.exists()) {
+          final content = await file.readAsString();
+          final Map<String, dynamic> settings = jsonDecode(content);
+          lastAddress = settings['last_obd_address'] as String?;
+          _logger.log('[OBDService] JSON settings last_obd_address: $lastAddress');
+        }
+      } catch (e) {
+        _logger.log('[OBDService] JSON settings read failed: $e');
+      }
+    }
+
+    // Try SharedPreferences with retry if file methods failed
     if (lastAddress == null || lastAddress.isEmpty) {
       for (int attempt = 1; attempt <= 3; attempt++) {
         try {
           final prefs = await SharedPreferences.getInstance();
           lastAddress = prefs.getString('last_obd_address');
-          _logger.log('[OBDService] SharedPrefs last_obd_address: $lastAddress');
-          break; // Success, exit retry loop
+          if (lastAddress != null && lastAddress.isNotEmpty) {
+            _logger.log('[OBDService] SharedPrefs last_obd_address: $lastAddress');
+            break;
+          }
         } catch (e) {
           _logger.log('[OBDService] SharedPreferences read failed (attempt $attempt): $e');
           if (attempt < 3) {
@@ -136,11 +223,11 @@ class OBDService {
             final content = await file.readAsString();
             final Map<String, dynamic> settings = jsonDecode(content);
             lastAddress = settings['last_obd_address'] as String?;
-            _logger.log('[OBDService] File settings last_obd_address: $lastAddress');
+            _logger.log('[OBDService] path_provider last_obd_address: $lastAddress');
           }
           break; // Success, exit retry loop
         } catch (e) {
-          _logger.log('[OBDService] File settings read failed (attempt $attempt): $e');
+          _logger.log('[OBDService] path_provider read failed (attempt $attempt): $e');
           if (attempt < 2) {
             await Future.delayed(Duration(milliseconds: 500 * attempt));
           }
@@ -161,6 +248,14 @@ class OBDService {
   Future<void> _loadCustomPIDs() async {
     // Start with empty list
     _customPIDs = [];
+
+    // Check if we need to migrate to a newer PID profile version
+    bool needsMigration = await _checkPidProfileMigration();
+    if (needsMigration) {
+      _logger.log('[OBDService] PID profile migration needed - refreshing from local profile');
+      await _migrateToLatestProfile();
+      return;
+    }
 
     try {
       // Try to load custom PIDs with 1 second timeout
@@ -194,6 +289,127 @@ class OBDService {
     // If still empty after all attempts, log warning
     if (_customPIDs.isEmpty) {
       _logger.log('[OBDService] WARNING: No PIDs configured! Please load a vehicle profile.');
+    }
+  }
+
+  /// Check if PID profile needs migration to newer version
+  Future<bool> _checkPidProfileMigration() async {
+    try {
+      final prefs = await SharedPreferences.getInstance().timeout(
+        const Duration(seconds: 1),
+        onTimeout: () => throw TimeoutException('SharedPreferences timeout'),
+      );
+      final savedVersion = prefs.getInt('pid_profile_version') ?? 0;
+
+      if (savedVersion < _pidProfileVersion) {
+        _logger.log('[OBDService] PID profile version $savedVersion < $_pidProfileVersion, migration needed');
+        return true;
+      }
+      return false;
+    } catch (e) {
+      _logger.log('[OBDService] Could not check profile version: $e');
+      // Check file-based version
+      return await _checkPidProfileMigrationFromFile();
+    }
+  }
+
+  /// Check migration from file
+  Future<bool> _checkPidProfileMigrationFromFile() async {
+    try {
+      String? filePath;
+      try {
+        final directory = await getApplicationDocumentsDirectory();
+        filePath = '${directory.path}/pid_profile_version.txt';
+      } catch (e) {
+        filePath = '/data/data/com.example.carsoc/files/pid_profile_version.txt';
+      }
+
+      final file = File(filePath);
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        final savedVersion = int.tryParse(content.trim()) ?? 0;
+        if (savedVersion < _pidProfileVersion) {
+          return true;
+        }
+        return false;
+      }
+      // No version file = first run or old install, needs migration
+      return true;
+    } catch (e) {
+      _logger.log('[OBDService] Could not check file profile version: $e');
+      return true; // Assume migration needed if we can't check
+    }
+  }
+
+  /// Migrate to latest PID profile (refresh XPENG G6 profile)
+  Future<void> _migrateToLatestProfile() async {
+    // Find XPENG G6 local profile
+    final xpengProfile = LocalVehicleProfiles.findProfile('XPENG G6');
+    if (xpengProfile != null) {
+      _customPIDs = xpengProfile.pids;
+      _logger.log('[OBDService] Migrated to XPENG G6 profile v$_pidProfileVersion with ${_customPIDs.length} PIDs');
+
+      // Save the updated PIDs
+      await _saveCustomPIDs(_customPIDs);
+
+      // Save the new version
+      await _savePidProfileVersion();
+    } else {
+      _logger.log('[OBDService] WARNING: Could not find XPENG G6 profile for migration');
+    }
+  }
+
+  /// Save custom PIDs to storage
+  Future<void> _saveCustomPIDs(List<OBDPIDConfig> pids) async {
+    final pidsJson = jsonEncode(pids.map((p) => p.toJson()).toList());
+
+    // Save to file first (most reliable)
+    try {
+      String? filePath;
+      try {
+        final directory = await getApplicationDocumentsDirectory();
+        filePath = '${directory.path}/obd_pids.json';
+      } catch (e) {
+        filePath = '/data/data/com.example.carsoc/files/obd_pids.json';
+      }
+      await File(filePath).writeAsString(pidsJson);
+      _logger.log('[OBDService] Saved PIDs to file: $filePath');
+    } catch (e) {
+      _logger.log('[OBDService] Failed to save PIDs to file: $e');
+    }
+
+    // Also try SharedPreferences
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('obd_pids', pidsJson);
+      _logger.log('[OBDService] Saved PIDs to SharedPreferences');
+    } catch (e) {
+      _logger.log('[OBDService] Failed to save PIDs to SharedPreferences: $e');
+    }
+  }
+
+  /// Save PID profile version
+  Future<void> _savePidProfileVersion() async {
+    // Save to SharedPreferences
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('pid_profile_version', _pidProfileVersion);
+    } catch (e) {
+      _logger.log('[OBDService] Failed to save profile version to SharedPreferences: $e');
+    }
+
+    // Also save to file
+    try {
+      String? filePath;
+      try {
+        final directory = await getApplicationDocumentsDirectory();
+        filePath = '${directory.path}/pid_profile_version.txt';
+      } catch (e) {
+        filePath = '/data/data/com.example.carsoc/files/pid_profile_version.txt';
+      }
+      await File(filePath).writeAsString('$_pidProfileVersion');
+    } catch (e) {
+      _logger.log('[OBDService] Failed to save profile version to file: $e');
     }
   }
 
@@ -272,9 +488,23 @@ class OBDService {
     }
   }
 
-  /// Save last connected address to hardcoded path, SharedPreferences, and path_provider file
+  /// Save last connected address to multiple locations for reliability
   Future<void> _saveLastAddress(String address) async {
-    // Save to hardcoded path first (most reliable - doesn't need path_provider)
+    // Save to simple dedicated text file FIRST (most reliable, no JSON parsing)
+    const obdAddressFile = '/data/data/com.example.carsoc/files/last_obd_device.txt';
+    try {
+      final file = File(obdAddressFile);
+      final dir = file.parent;
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      await file.writeAsString(address);
+      _logger.log('[OBDService] Saved OBD address to dedicated file: $address');
+    } catch (e) {
+      _logger.log('[OBDService] Warning: Could not save to dedicated file: $e');
+    }
+
+    // Also save to JSON settings file
     const hardcodedPath = '/data/data/com.example.carsoc/files/app_settings.json';
     try {
       final file = File(hardcodedPath);
@@ -293,16 +523,16 @@ class OBDService {
 
       settings['last_obd_address'] = address;
       await file.writeAsString(jsonEncode(settings));
-      _logger.log('[OBDService] Saved last OBD address to hardcoded path: $address');
+      _logger.log('[OBDService] Saved OBD address to JSON settings: $address');
     } catch (e) {
-      _logger.log('[OBDService] Warning: Could not save to hardcoded path: $e');
+      _logger.log('[OBDService] Warning: Could not save to JSON settings: $e');
     }
 
     // Also save to SharedPreferences
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('last_obd_address', address);
-      _logger.log('[OBDService] Saved last OBD address to prefs: $address');
+      _logger.log('[OBDService] Saved OBD address to SharedPreferences: $address');
     } catch (e) {
       _logger.log('[OBDService] Warning: Could not save to SharedPreferences: $e');
     }
@@ -390,6 +620,32 @@ class OBDService {
     return null; // Use standard auto protocol (ATSP0)
   }
 
+  /// Get the expected response address for a given request header
+  /// XPENG uses: 704 -> 784 (BMS), 7E0 -> 7E8 (VCU)
+  String _getResponseAddress(String header) {
+    // CAN response address calculation:
+    // - For 7xx (e.g., 704): response is 7xx + 0x80 = 784
+    // - For 7Ex (e.g., 7E0): response is 7Ex + 0x08 = 7E8
+    try {
+      final requestId = int.parse(header, radix: 16);
+      int responseId;
+
+      // Check if this is a 7Ex style address (0x7E0-0x7EF)
+      if ((requestId & 0x7F0) == 0x7E0) {
+        // For 7Ex addresses, add 8 to get 7E8, 7E9, etc.
+        responseId = requestId + 0x08;
+      } else {
+        // For other addresses (like 704), add 0x80 to get 784
+        responseId = requestId + 0x80;
+      }
+
+      return responseId.toRadixString(16).toUpperCase();
+    } catch (e) {
+      // Fallback: return as-is if parsing fails
+      return header;
+    }
+  }
+
   /// Initialize ELM327 adapter
   Future<void> _initializeELM327() async {
     try {
@@ -418,6 +674,11 @@ class OBDService {
           if (cmd.isNotEmpty) {
             await _sendCommand(cmd.trim());
             await Future.delayed(const Duration(milliseconds: 100));
+            // Track header state from init commands
+            if (cmd.trim().startsWith('ATSH')) {
+              _currentEcuHeader = cmd.trim().substring(4);
+              _logger.log('[OBDService] Initial header set to: $_currentEcuHeader');
+            }
           }
         }
       } else {
@@ -425,6 +686,7 @@ class OBDService {
         _logger.log('[OBDService] Using standard init (auto protocol)');
         await _sendCommand('ATSP0');
         await Future.delayed(const Duration(milliseconds: 100));
+        _currentEcuHeader = null; // Unknown header in auto mode
       }
 
       // Allow long messages (for multi-frame responses)
@@ -531,8 +793,8 @@ class OBDService {
       _logger.log('[OBDService] WARNING: No PIDs to query! Data collection will not produce results.');
     }
 
-    // Poll every 2 seconds to reduce load and prevent app hangs
-    _pollingTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+    // Poll every 5 seconds to reduce load and prevent app hangs
+    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
       // Skip if polling is paused (proxy client connected)
       if (_pollingPaused) {
         return;
@@ -585,9 +847,58 @@ class OBDService {
         return VehicleData(timestamp: DateTime.now());
       }
 
-      // Query each configured PID
+      // Increment poll cycle counter
+      _pollCycleCount++;
+      final bool pollLowPriority = (_pollCycleCount % _lowPriorityInterval == 0) || _pollCycleCount == 1;
+
+      if (pollLowPriority) {
+        _logger.log('[OBDService] Poll cycle $_pollCycleCount: polling ALL PIDs (including low priority)');
+      } else {
+        _logger.log('[OBDService] Poll cycle $_pollCycleCount: polling HIGH priority PIDs only');
+      }
+
+      // Use class field to track actual ELM327 header state across poll cycles
+      // This persists across polls so we know the real adapter state
+
+      // Query each configured PID based on priority
       for (final pidConfig in _customPIDs) {
+        // Skip low priority PIDs unless it's time to poll them
+        if (pidConfig.priority == PIDPriority.low && !pollLowPriority) {
+          // Use cached value if available
+          if (_lastLowPriorityValues.containsKey(pidConfig.pid)) {
+            final cachedValue = _lastLowPriorityValues[pidConfig.pid]!;
+            // Apply cached value to appropriate field
+            _applyCachedValue(pidConfig, cachedValue, additionalData,
+                soh: (v) => soh = v,
+                odometer: (v) => odometer = v,
+                cumulativeCharge: (v) => cumulativeCharge = v,
+                cumulativeDischarge: (v) => cumulativeDischarge = v);
+          }
+          continue;
+        }
         try {
+          // Switch header if this PID requires a different one
+          // Compare against actual adapter state, not assumed state
+          if (pidConfig.header != null && pidConfig.header != _currentEcuHeader) {
+            final responseAddr = _getResponseAddress(pidConfig.header!);
+            _logger.log('[OBDService] Switching ECU header: ${_currentEcuHeader ?? "unknown"} -> ${pidConfig.header} (response: $responseAddr)');
+
+            // Set CAN transmit header
+            final headerResult = await _sendCommand('ATSH${pidConfig.header}');
+            await Future.delayed(const Duration(milliseconds: 50));
+
+            // Set CAN receive address filter
+            final craResult = await _sendCommand('ATCRA$responseAddr');
+            await Future.delayed(const Duration(milliseconds: 50));
+
+            // Set flow control header for multi-frame responses
+            final fcshResult = await _sendCommand('ATFCSH${pidConfig.header}');
+            await Future.delayed(const Duration(milliseconds: 50));
+
+            _currentEcuHeader = pidConfig.header;
+            _logger.log('[OBDService] Header switch complete: ATSH=$headerResult, ATCRA=$craResult, ATFCSH=$fcshResult');
+          }
+
           final response = await _sendCommand(pidConfig.pid);
 
           // Skip if empty response
@@ -601,6 +912,11 @@ class OBDService {
           if (value.isNaN) {
             _logger.log('[OBDService] ${pidConfig.name}: skipped (error response)');
             continue;
+          }
+
+          // Cache low priority values for use in cycles when they're not polled
+          if (pidConfig.priority == PIDPriority.low) {
+            _lastLowPriorityValues[pidConfig.pid] = value;
           }
 
           // Map to appropriate field based on type and name
@@ -628,6 +944,16 @@ class OBDService {
             case OBDPIDType.cumulativeDischarge:
               cumulativeDischarge = value;
               _logger.log('[OBDService] Cumulative Discharge: $value Ah');
+              break;
+            case OBDPIDType.cellVoltages:
+              // Average cell voltage - store in additional data
+              additionalData['cellVoltageAvg'] = value;
+              _logger.log('[OBDService] Cell Voltage Avg: ${value.toStringAsFixed(3)} V');
+              break;
+            case OBDPIDType.cellTemperatures:
+              // Average cell temperature - store in additional data
+              additionalData['cellTempAvg'] = value;
+              _logger.log('[OBDService] Cell Temp Avg: ${value.toStringAsFixed(1)} °C');
               break;
             case OBDPIDType.custom:
               _logger.log('[OBDService] ${pidConfig.name}: $value');
@@ -711,6 +1037,7 @@ class OBDService {
       _isConnected = false;
       _connectedDeviceAddress = null;
       _receiveBuffer.clear();
+      _currentEcuHeader = null; // Reset header state on disconnect
 
       _logger.log('[OBDService] Disconnected from OBD adapter');
     } catch (e) {

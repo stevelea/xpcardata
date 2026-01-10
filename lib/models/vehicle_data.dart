@@ -14,6 +14,11 @@ class VehicleData {
   final double? power; // kW
   final double? cumulativeCharge; // Ah - total energy charged into battery
   final double? cumulativeDischarge; // Ah - total energy discharged from battery
+  final double? latitude; // GPS latitude
+  final double? longitude; // GPS longitude
+  final double? altitude; // GPS altitude (meters)
+  final double? gpsSpeed; // GPS speed (km/h)
+  final double? heading; // GPS heading (degrees)
   final Map<String, dynamic>? additionalProperties;
 
   VehicleData({
@@ -30,8 +35,16 @@ class VehicleData {
     this.power,
     this.cumulativeCharge,
     this.cumulativeDischarge,
+    this.latitude,
+    this.longitude,
+    this.altitude,
+    this.gpsSpeed,
+    this.heading,
     this.additionalProperties,
   });
+
+  /// Check if location data is available
+  bool get hasLocation => latitude != null && longitude != null;
 
   /// Convert to Map for database storage
   Map<String, dynamic> toMap() {
@@ -49,6 +62,11 @@ class VehicleData {
       'power': power,
       'cumulativeCharge': cumulativeCharge,
       'cumulativeDischarge': cumulativeDischarge,
+      'latitude': latitude,
+      'longitude': longitude,
+      'altitude': altitude,
+      'gpsSpeed': gpsSpeed,
+      'heading': heading,
       'additionalProperties':
           additionalProperties != null ? jsonEncode(additionalProperties) : null,
     };
@@ -70,6 +88,11 @@ class VehicleData {
       power: map['power'] as double?,
       cumulativeCharge: map['cumulativeCharge'] as double?,
       cumulativeDischarge: map['cumulativeDischarge'] as double?,
+      latitude: map['latitude'] as double?,
+      longitude: map['longitude'] as double?,
+      altitude: map['altitude'] as double?,
+      gpsSpeed: map['gpsSpeed'] as double?,
+      heading: map['heading'] as double?,
       additionalProperties: map['additionalProperties'] != null
           ? jsonDecode(map['additionalProperties'] as String) as Map<String, dynamic>
           : null,
@@ -92,6 +115,11 @@ class VehicleData {
       'power': power,
       'cumulativeCharge': cumulativeCharge,
       'cumulativeDischarge': cumulativeDischarge,
+      'latitude': latitude,
+      'longitude': longitude,
+      'altitude': altitude,
+      'gpsSpeed': gpsSpeed,
+      'heading': heading,
       if (additionalProperties != null) ...additionalProperties!,
     };
   }
@@ -112,6 +140,11 @@ class VehicleData {
       power: (json['power'] as num?)?.toDouble(),
       cumulativeCharge: (json['cumulativeCharge'] as num?)?.toDouble(),
       cumulativeDischarge: (json['cumulativeDischarge'] as num?)?.toDouble(),
+      latitude: (json['latitude'] as num?)?.toDouble(),
+      longitude: (json['longitude'] as num?)?.toDouble(),
+      altitude: (json['altitude'] as num?)?.toDouble(),
+      gpsSpeed: (json['gpsSpeed'] as num?)?.toDouble(),
+      heading: (json['heading'] as num?)?.toDouble(),
     );
   }
 
@@ -130,6 +163,11 @@ class VehicleData {
     double? power,
     double? cumulativeCharge,
     double? cumulativeDischarge,
+    double? latitude,
+    double? longitude,
+    double? altitude,
+    double? gpsSpeed,
+    double? heading,
     Map<String, dynamic>? additionalProperties,
   }) {
     return VehicleData(
@@ -146,6 +184,11 @@ class VehicleData {
       power: power ?? this.power,
       cumulativeCharge: cumulativeCharge ?? this.cumulativeCharge,
       cumulativeDischarge: cumulativeDischarge ?? this.cumulativeDischarge,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      altitude: altitude ?? this.altitude,
+      gpsSpeed: gpsSpeed ?? this.gpsSpeed,
+      heading: heading ?? this.heading,
       additionalProperties: additionalProperties ?? this.additionalProperties,
     );
   }

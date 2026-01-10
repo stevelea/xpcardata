@@ -2,12 +2,16 @@ import 'dart:async';
 import 'dart:io';
 import 'debug_logger.dart';
 import 'native_bluetooth_service.dart';
+import '../models/obd_pid_config.dart';
 
 /// OBD WiFi Proxy Service (Singleton)
 ///
 /// Acts as a WiFi-to-Bluetooth bridge for OBD-II communication.
 /// Allows external OBD scanner apps to connect via WiFi and communicate
 /// with the Bluetooth OBD adapter through this app.
+///
+/// Can intercept PID responses and forward them to internal consumers
+/// (dashboard, MQTT) while proxying to external apps.
 ///
 /// Standard ELM327 WiFi adapters use port 35000.
 class OBDProxyService {
@@ -29,10 +33,20 @@ class OBDProxyService {
   final StringBuffer _receiveBuffer = StringBuffer();
   StreamSubscription? _clientSubscription;
 
+  // Track last command sent for response matching
+  String? _lastCommand;
+
+  // PIDs to intercept for internal use (maps PID code to config)
+  final Map<String, OBDPIDConfig> _interceptPIDs = {};
+
   // Callbacks for status updates
   Function(bool isRunning, String? clientAddress)? onStatusChanged;
 
+  // Callback for intercepted PID data (pidName, parsedValue, rawResponse)
+  Function(String pidName, double value, String rawResponse)? onPIDIntercepted;
+
   bool get isRunning => _isRunning;
+  bool get hasClient => _client != null;
   int get port => _port;
   String? get clientAddress => _client?.remoteAddress.address;
 
@@ -43,6 +57,18 @@ class OBDProxyService {
   factory OBDProxyService(NativeBluetoothService bluetooth) {
     _instance ??= OBDProxyService._internal(bluetooth);
     return _instance!;
+  }
+
+  /// Set PIDs to intercept for internal use
+  /// These PIDs will be parsed when seen in proxy traffic and forwarded
+  /// to the onPIDIntercepted callback
+  void setInterceptPIDs(List<OBDPIDConfig> pids) {
+    _interceptPIDs.clear();
+    for (final pid in pids) {
+      // Store by PID code (e.g., "221109" for SOC)
+      _interceptPIDs[pid.pid.toUpperCase()] = pid;
+    }
+    _logger.log('[OBDProxy] Set ${_interceptPIDs.length} PIDs to intercept');
   }
 
   /// Start the WiFi proxy server
@@ -161,6 +187,7 @@ class OBDProxyService {
     }
     _client = null;
     _receiveBuffer.clear();
+    _lastCommand = null;
 
     if (_isRunning) {
       onStatusChanged?.call(true, null);
@@ -194,6 +221,9 @@ class OBDProxyService {
     try {
       _logger.log('[OBDProxy] Processing command: "$command"');
 
+      // Store the command for response matching
+      _lastCommand = command.toUpperCase();
+
       // Check if Bluetooth is connected
       final connected = await _bluetooth.isConnected();
       if (!connected) {
@@ -212,6 +242,9 @@ class OBDProxyService {
 
       _logger.log('[OBDProxy] BT RX: ${response.trim().replaceAll('\r', '<CR>').replaceAll('\n', '<LF>')}');
 
+      // Try to intercept and parse PID response for internal use
+      _tryInterceptPID(_lastCommand!, response);
+
       // Forward response to WiFi client
       _sendToClient(response);
       _logger.log('[OBDProxy] Response forwarded to WiFi client');
@@ -219,6 +252,37 @@ class OBDProxyService {
     } catch (e) {
       _logger.log('[OBDProxy] ERROR forwarding command: $e');
       _sendToClient('ERROR\r\n>');
+    }
+  }
+
+  /// Try to intercept and parse a PID response for internal use
+  void _tryInterceptPID(String command, String response) {
+    if (onPIDIntercepted == null || _interceptPIDs.isEmpty) {
+      return;
+    }
+
+    // Check if this command is a PID we're interested in
+    final pidConfig = _interceptPIDs[command];
+    if (pidConfig == null) {
+      return;
+    }
+
+    try {
+      // Parse the response using the PID's parser
+      final value = pidConfig.parser(response);
+
+      // Skip NaN values (error responses)
+      if (value.isNaN) {
+        _logger.log('[OBDProxy] Intercepted ${pidConfig.name} but got error response');
+        return;
+      }
+
+      _logger.log('[OBDProxy] Intercepted ${pidConfig.name}: $value');
+
+      // Call the callback with the parsed data
+      onPIDIntercepted?.call(pidConfig.name, value, response);
+    } catch (e) {
+      _logger.log('[OBDProxy] Error parsing intercepted PID ${pidConfig.name}: $e');
     }
   }
 
