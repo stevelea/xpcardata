@@ -4,9 +4,16 @@
 
 ---
 
-**XPCarData v1.0.0 Released**
+**XPCarData v1.0.0+25 Released**
 
-Battery monitoring app for XPENG vehicles - get real-time SOC, SOH, voltage, current, temperature, and power data via OBD-II Bluetooth.
+Battery monitoring app for XPENG vehicles - get real-time SOC, SOH, voltage, current, temperature, power, and estimated range via OBD-II Bluetooth.
+
+**New in Build 25:**
+- Side-by-side Battery & Range display on dashboard
+- Service status icons (MQTT, ABRP, Proxy, VPN)
+- Real-time VPN status detection
+- 11 new PIDs including DC charging data, cell voltages, and temperatures
+- Automatic AC/DC charging type detection
 
 **Features:**
 - ABRP integration - live telemetry for accurate range predictions while driving
@@ -14,14 +21,15 @@ Battery monitoring app for XPENG vehicles - get real-time SOC, SOH, voltage, cur
 - Home Assistant auto-discovery - entities automatically appear in HA
 - Background service - keeps collecting data when app is minimized
 - Configurable alerts for low battery and high temperature
+- Tailscale VPN control - connect/disconnect directly from the app
 
 **Note:** Cannot be used simultaneously with ABRP's native OBD-II connection unless your adapter supports multiple BLE connections.
 
 **Use Cases:**
 
-**On the road:** Run on your phone while driving to feed live data to ABRP for better route planning. Data can also be sent to Home Assistant via MQTT at the same time, or use MQTT exclusively if you prefer ABRP's native OBD connection.
+**On the road:** Run on your phone while driving to feed live data to ABRP for better route planning. Dashboard shows Battery SOC and estimated Range side-by-side with status icons for all connected services. Data can also be sent to Home Assistant via MQTT at the same time.
 
-**Charging monitoring:** Leave an old phone/tablet near or in the car connected to the OBD-II adapter ( for example AI box powered by car 12v ) . Use the XPeng app's "Enable 12V" feature or an X-Combo to wake the car and turn on 12V power - XPCarData will then collect and publish charging data to your home MQTT broker via Tailscale. Track your charging progress from anywhere!
+**Charging monitoring:** Leave an old phone/tablet near or in the car connected to the OBD-II adapter (for example AI box powered by car 12v). Use the XPeng app's "Enable 12V" feature or an X-Combo to wake the car and turn on 12V power - XPCarData will then collect and publish charging data to your home MQTT broker via Tailscale. Now tracks DC charging voltage, current, and power! Track your charging progress from anywhere!
 
 **Smart charging:** The MQTT data may help with EVCC or other smart charger setups that need real-time SOC data from the vehicle.
 
@@ -37,18 +45,22 @@ Feedback and issues welcome!
 
 ---
 
-**XPCarData - Battery Monitoring for XPENG Vehicles**
+**XPCarData v1.0.0+25 - Battery Monitoring for XPENG Vehicles**
 
 Real-time battery monitoring app with ABRP and Home Assistant integration.
 
 **Features:**
-- Live battery data: SOC, SOH, voltage, current, temperature, power, odometer
+- Live battery data: SOC, SOH, voltage, current, temperature, power, range, odometer
+- Side-by-side Battery & Range dashboard with service status icons
+- DC charging monitoring (voltage, current, power)
 - OBD-II Bluetooth connection (ELM327 compatible)
 - ABRP integration for accurate range predictions
 - MQTT publishing for Home Assistant / home automation
 - Background service for continuous monitoring
+- Tailscale VPN control with real-time status
 - Configurable update intervals and alerts
-- Works on Android phones, tablets, or AI boxes (e.g., Carlinkit)
+- Ideally suited for Android AI boxes (e.g., Carlinkit), also works on phones and tablets
+- Cannot be installed directly on XPENG's built-in infotainment
 
 **Requirements:**
 - Android 10+
@@ -68,30 +80,34 @@ Use your Tailscale address, public/published address, or any VPN solution you pr
 
 ---
 
-**XPCarData v1.0.0 - Battery Monitoring for XPENG Electric Vehicles**
+**XPCarData v1.0.0+25 - Battery Monitoring for XPENG Electric Vehicles**
 
 I've been working on a battery monitoring app for my XPENG G6 and wanted to share it with the community.
 
 **What it does:**
 - Reads real-time battery data via OBD-II Bluetooth adapter
-- Displays SOC, SOH, voltage, current, temperature, power, speed, odometer
+- Displays SOC, SOH, voltage, current, temperature, power, range, speed, odometer
+- Side-by-side Battery & Range display with service status icons
 - Sends live telemetry to ABRP for accurate range predictions
 - Publishes data to MQTT for Home Assistant integration
 - Runs in background for continuous monitoring
-- Detects and logs charging sessions
+- Detects and logs charging sessions with AC/DC type detection
+- Real-time VPN status monitoring
 
 **Data displayed:**
 - State of Charge (SOC) %
 - State of Health (SOH) %
+- Estimated Range (km)
 - HV Battery Voltage (V)
 - HV Battery Current (A)
 - Max/Min Cell Voltage (V)
 - Max/Min Battery Temperature (C)
 - Battery Coolant Temperature (C)
 - Motor Coolant Temperature (C)
-- DC Charging Voltage/Current
+- DC Charging Voltage/Current/Power
 - Cumulative Charge/Discharge (Ah)
 - Speed, Odometer
+- Service status: MQTT, ABRP, Proxy, VPN
 
 **Integrations:**
 - **ABRP**: Configurable update interval (5 sec - 5 min, default 1 min to avoid rate limiting)
@@ -105,7 +121,8 @@ To connect to your home MQTT broker from your vehicle, use:
 
 **Platform:**
 - Android 10+
-- Works on phones, tablets, or Android AI boxes (e.g., Carlinkit)
+- Ideally suited for Android AI boxes (e.g., Carlinkit), also works on phones and tablets
+- Cannot be installed directly on XPENG's built-in infotainment system
 - Cannot be used simultaneously with ABRP's native OBD connection (single BLE connection limitation)
 
 **Tested on:**

@@ -1,6 +1,96 @@
 # XPCarData Release Notes
 
-## Version 1.0.0 (Build 8) - 2026-01-07
+## Version 1.0.7 (Build 32) - 2026-01-11
+
+### New Features
+
+- **Dashboard Charging History**: Recent charging sessions now displayed directly on the dashboard with quick access to full history
+- **Internet Status Indicator**: New connectivity indicator shows real-time internet status via DNS lookup
+- **PID Priority Indicators**: Low-priority PIDs now show a grey dot indicator to distinguish from real-time data
+
+### UI Improvements
+
+- **Consolidated Power Card**: Voltage, Current, and Power now displayed in a single compact card (V / A / kW format)
+- **Swapped Speed and Range**: Speed is now displayed prominently with SOC; Guestimated Range moved to metrics grid
+- **Cleaner Service Icons**: Status indicator backgrounds are now white/light for better visibility
+- **Updated Tagline**: App description changed to "Data Monitor for EVs"
+
+### Bug Fixes
+
+- **Fixed charging end detection**: Now requires 2 consecutive non-charging samples to confirm charging stopped (prevents false stops)
+- **Fixed GitHub token dialog**: Token input dialog now properly scrollable and accessible
+- **Removed Graylog feature**: Graylog log streaming removed from app
+
+---
+
+## Version 1.0.6 (Build 31) - 2026-01-11
+
+### Bug Fixes
+
+- **Fixed charging indicator on dashboard**: Now correctly detects charging using negative current (XPENG convention: negative = charging into battery)
+- **Fixed BMS_CHG_STATUS value 4**: Added support for high-power DC charging status (value 4)
+- **Fixed GitHub rate limiting**: Added optional GitHub token support in Settings to avoid rate limit errors when checking for updates
+
+### Improvements
+
+- **Better DC charging power display**: Now uses DC charger power (DC_CHG_A × DC_CHG_V) for more accurate kW reading during DC fast charging
+- **Multiple charging detection methods**: Dashboard charging indicator now checks battery current, CHARGING PID, and BMS_CHG_STATUS
+
+---
+
+## Version 1.0.5 (Build 30) - 2026-01-11
+
+### New Features
+
+- **Priority-Based PID Polling**: PIDs are now categorized as high or low priority
+  - High priority PIDs (SOC, voltage, current, speed, charging status) poll every 5 seconds
+  - Low priority PIDs (SOH, odometer, cell data, cumulative charge) poll every ~5 minutes
+  - Reduces OBD bus traffic by ~50% while keeping critical data fresh
+  - Cached values from low-priority PIDs are used between polls
+
+- **Improved Charging Detection**: Now uses HV battery current (HV_A) as primary indicator
+  - Negative current = charging (matches dashboard display)
+  - Requires 2 consecutive stationary samples to filter out regenerative braking
+  - AC vs DC detection based on current magnitude (<50A = AC, >=50A = DC)
+
+- **Dashboard UI Updates**:
+  - Range label changed to "Guestimated Range" to clarify it's a calculated estimate
+  - Calculated from SOC × battery capacity × efficiency
+
+### Bug Fixes
+
+- **Fixed package_info_plus failure**: Replaced with hardcoded version constants for AAOS compatibility
+- **Fixed About section**: Now correctly displays version, build number, and build date
+- **Fixed PID formula migration**: Automatic migration to latest PID profile version (v3)
+
+---
+
+## Version 1.0.4 (Build 29) - 2026-01-10
+
+### Bug Fixes
+
+- **Fixed AC charging formula**: AC_CHG_A now uses `[B4:B5]*2` (was `/10`)
+- **Fixed AC charging voltage formula**: AC_CHG_V now uses `B4*3` (was `/10`)
+- **PID profile migration**: Automatic refresh of PID formulas when profile version changes
+- **Bluetooth auto-reconnect**: Improved address storage with dedicated text file fallback
+
+---
+
+## Version 1.0.3 (Build 28) - 2026-01-09
+
+### New Features
+
+- **Graylog Log Streaming**: Optional debug log streaming to Graylog server via UDP GELF
+- **OBD Proxy Service**: Proxy OBD data to external applications
+
+### Bug Fixes
+
+- **Bluetooth reconnection**: Fixed auto-reconnect not working on app restart
+- **Settings persistence**: Improved reliability of OBD address storage
+
+---
+
+## Version 1.0.0 (Build 25) - 2026-01-08
 
 ### New Features
 
@@ -8,14 +98,20 @@
 - **Multiple Data Sources**: Support for CarInfo API (Android Automotive) and OBD-II Bluetooth adapters
 - **ABRP Integration**: Send live telemetry to A Better Route Planner for accurate range predictions
 - **MQTT Publishing**: Publish vehicle data to any MQTT broker for home automation and monitoring
+- **Home Assistant Discovery**: Automatic entity creation in Home Assistant via MQTT
 - **Verified PID Profiles**: Pre-configured PID settings for XPENG G6 and other vehicles
 - **Custom PID Support**: Add and configure custom OBD-II PIDs for any vehicle
 - **Alert System**: Configurable alerts for low battery, critical battery, and high temperature conditions
 - **Historical Data**: Store and view historical vehicle data with configurable retention
 - **Debug Logging**: Comprehensive logging for troubleshooting with share functionality
+- **VPN Status Detection**: Real-time VPN connection status via Android ConnectivityManager API
+- **Tailscale VPN Control**: Connect/disconnect Tailscale directly from app settings
 
 ### Dashboard
 
+- **Side-by-side Battery and Range**: Battery SOC and estimated range displayed prominently in colored cards
+- Human-readable timestamp showing when data was last updated
+- **Service Status Icons**: Visual indicators for MQTT, ABRP, OBD Proxy, and VPN connection status
 - Clean, modern UI with large battery level display
 - 2-column metric card layout for better readability
 - Full odometer display (not abbreviated)
@@ -26,10 +122,11 @@
 ### OBD-II Features
 
 - Bluetooth device scanning and connection
-- Automatic reconnection every 60 seconds on connection loss
+- Automatic reconnection with exponential backoff on connection loss
 - Support for ELM327-compatible adapters
 - Configurable PID polling with custom formulas
 - Verified profiles for known vehicle configurations
+- Automatic ECU header switching (BMS: 704, VCU: 7E0)
 
 ### ABRP Integration
 
@@ -47,94 +144,92 @@
 - Automatic reconnection with exponential backoff
 - Last Will and Testament for offline detection
 
-### Settings
-
-- MQTT broker configuration (host, port, TLS, credentials)
-- ABRP token and car model configuration
-- Alert threshold customization
-- Update frequency adjustment
-- Data retention settings
-- Export and clear data options
-- Start minimized option
-
-### About
-
-- Dynamic version and build number display
-- Build date tracking
-
 ---
 
 ## Version History
 
-### Build 8 (2026-01-07)
-- **Tailscale open app fix**: Fixed "Open Tailscale App" button using proper intent with category and component
-- **Background service fix**: Added proper initialization check and error handling for MissingPluginException
-- **OBD auto-connect improvements**: Now saves OBD address to both SharedPreferences and file-based settings; reads from both on startup with fallback
+### Build 32 (2026-01-11)
+- **Dashboard charging history**: Recent sessions shown on dashboard with "View All" link
+- **Internet status indicator**: Real-time connectivity monitoring via DNS lookup
+- **PID priority indicators**: Grey dot shown for low-priority PIDs
+- **Consolidated Power card**: V/A/kW in single card
+- **Speed/Range swap**: Speed now primary with SOC, Range in grid
+- **Charging end detection fix**: Requires 2 consecutive non-charging samples
+- **Removed Graylog**: Feature removed from settings
 
-### Build 7 (2026-01-07)
-- **OBD auto-connect fix**: Fixed last OBD device address not being saved/awaited properly for auto-reconnect on startup
+### Build 31 (2026-01-11)
+- **Fixed charging indicator**: Now correctly uses negative current for charging detection
+- **BMS_CHG_STATUS value 4**: Support for high-power DC charging status
+- **GitHub token**: Optional token support to avoid rate limiting
+- **Better DC power display**: Uses DC charger PIDs for accurate power reading
 
-### Build 6 (2026-01-07)
-- **Exit button**: Power button in app bar to cleanly stop all services and exit
-- **Tailscale VPN control**: Connect/disconnect Tailscale VPN directly from settings
-- **Auto-connect option**: Automatically connect Tailscale when app starts
-- Open Tailscale app from within XPCarData
-- Auto-detection of Tailscale installation
+### Build 30 (2026-01-11)
+- **Priority-based PID polling**: High priority every 5 sec, low priority every 5 min
+- **Improved charging detection**: HV current-based with 2-sample stationary requirement
+- **Dashboard**: Changed "Range" to "Guestimated Range"
+- **Fixed**: package_info_plus failure on AAOS, About section display
 
-### Build 5 (2026-01-07)
-- Home Assistant MQTT auto-discovery support
-- Charging session detection now only publishes when energy is actually added
-- Background service foreground service type fix for Android 13+
-- ABRP update interval slider (5 sec - 5 min, default 1 min)
-- Improved error handling for background service toggle
-- Added author info to About screen
+### Build 29 (2026-01-10)
+- **Fixed AC charging formulas**: AC_CHG_A = [B4:B5]*2, AC_CHG_V = B4*3
+- **PID profile migration**: Auto-refresh when formulas change
+- **Bluetooth**: Improved address storage reliability
 
-### Build 4 (2026-01-07)
-- Background service improvements
-- Permission handling enhancements
+### Build 28 (2026-01-09)
+- **Graylog integration**: UDP GELF log streaming
+- **OBD Proxy service**: Data routing to external apps
+- **Bluetooth fixes**: Auto-reconnect improvements
 
-### Build 3 (2025-01-07)
-- ABRP interval configuration
-- WidgetsBindingObserver for app lifecycle
+### Build 27 (2026-01-09)
+- Additional BMS PIDs discovered and documented
+- Charging session improvements
 
-### Build 2 (2025-01-07)
-- Simplified MQTT to single data topic
-- Added dynamic version info to About screen
-- Updated build date display
-- Incremented build number
+### Build 26 (2026-01-08)
+- PID formula corrections
+- Multi-frame response handling improvements
 
-### Build 1 (2025-01-06)
-- Initial release
-- Dashboard redesign with wider 2-column layout
-- ABRP authorization fix (added api_key parameter)
-- ABRP odometer transmission
-- OBD Bluetooth auto-reconnect (60-second retry)
-- Removed mock data functionality
-- Custom APK naming (XPCarData-release-{version}+{build}.apk)
-- App title simplified to "XPCarData"
+### Build 25 (2026-01-08)
+- **Dashboard redesign**: Side-by-side Battery SOC and Estimated Range display with colored cards
+- **Human-readable timestamp**: Shows when data was last updated (e.g., "12:34:56" or "2 min ago")
+- **Service status icons**: Visual indicators for MQTT, ABRP, OBD Proxy, and VPN connection status
+- **VPN status detection**: Real-time VPN status using Android ConnectivityManager API
+- Added native Kotlin code for VPN detection via NetworkCapabilities.TRANSPORT_VPN
+
+### Build 24 (2026-01-08)
+- **11 new PIDs added**: Comprehensive battery and charging data
+- **Charging type detection**: Automatic AC/DC charging detection based on voltage threshold
+- **Power calculation**: Real-time power calculated from voltage × current
+- **Enhanced charging sessions**: Tracks charging type, DC power, cumulative energy
+
+### Builds 1-23
+- Initial development and feature additions
+- See earlier release notes for complete history
 
 ---
 
 ## Known Issues
 
-- Custom APK naming outputs to `build/app/outputs/apk/release/` folder (Flutter copies to flutter-apk with default name)
+- Custom APK naming outputs to `build/app/outputs/apk/release/` folder
 - OBD connection may require vehicle ignition to be on
+- Some PIDs may return negative response if not supported in current vehicle state
 
 ## Requirements
 
 - Android 10 (API 29) or higher
 - Bluetooth permission for OBD-II connection
-- Internet permission for ABRP and MQTT
+- Internet permission for ABRP, MQTT, and Graylog
 - For CarInfo API: XPENG Android Automotive OS
 
 ## Installation
 
-1. Download `XPCarData-release-1.0.0+8.apk`
+1. Download `XPCarData-v1.0.7-build32.apk`
 2. Enable installation from unknown sources if prompted
-3. Install on your XPENG vehicle or Android device
+3. Install on your Android device (AI Box, phone, or tablet)
+
+**Note:** Cannot be installed directly on XPENG's built-in infotainment system. Ideally suited for Android AI boxes (e.g., Carlinkit).
 
 ## File Locations
 
-- APK: `build/app/outputs/apk/release/XPCarData-release-1.0.0+8.apk`
+- APK: `/Users/stevelea/CarSOC/XPCarData-v1.0.7-build32.apk`
 - User Guide: `docs/USER_GUIDE.md`
 - Release Notes: `docs/RELEASE_NOTES.md`
+- PID Reference: `docs/XPENG_G6_PIDs.md`

@@ -2,15 +2,17 @@
 
 ## Overview
 
-XPCarData is a battery monitoring app designed for XPENG electric vehicles. It displays real-time battery status, vehicle metrics, and can integrate with external services like ABRP (A Better Route Planner) and MQTT brokers.
+XPCarData is a battery monitoring app designed for XPENG electric vehicles. It displays real-time battery status, vehicle metrics, and can integrate with external services like ABRP (A Better Route Planner), MQTT brokers, Home Assistant, and Graylog for remote debugging.
 
 ## Getting Started
 
 ### Installation
 
-1. Download the APK file: `XPCarData-release-1.0.0+2.apk`
+1. Download the latest APK file: `XPCarData-v1.0.7-build32.apk`
 2. Enable "Install from unknown sources" in your Android settings if prompted
-3. Install the APK on your XPENG vehicle's infotainment system or Android device
+3. Install the APK on your Android device
+
+**Note:** This app cannot be installed directly on XPENG's built-in infotainment system. It is ideally suited for Android AI Boxes (e.g., Carlinkit) but will also work on Android phones or tablets.
 
 ### First Launch
 
@@ -23,17 +25,25 @@ When you first open XPCarData, the app will automatically attempt to connect to 
 
 The home screen displays:
 
-- **Battery Level**: Large display showing current State of Charge (SOC) percentage
-- **Data Source**: Indicates whether data is coming from CarInfo API or OBD-II
+- **Battery & Range Cards**: Side-by-side display showing:
+  - **Battery**: Current State of Charge (SOC) percentage with color-coded background
+  - **Guestimated Range**: Calculated driving range in kilometers (SOC × battery capacity × efficiency)
+- **Data Source & Timestamp**: Shows the active data source (CarInfo API or OBD-II) and when data was last updated
+- **Service Status Icons**: Visual indicators for connected services:
+  - **MQTT**: Green when connected to MQTT broker
+  - **ABRP**: Green when ABRP telemetry is enabled
+  - **Proxy**: Green when OBD Proxy service is running
+  - **VPN**: Green when VPN (e.g., Tailscale) is active
 - **Metric Cards**:
   - State of Health (SOH)
-  - Battery Temperature
-  - Voltage
+  - Battery Temperature (Max/Min)
+  - Voltage (HV Battery and Cell Max/Min)
   - Current
   - Power (kW)
   - Speed
   - Odometer
-  - Range (if available)
+  - DC Charging data (when charging)
+  - Coolant temperatures
 - **Additional Data**: Any extra PIDs configured will appear below the main metrics
 
 Pull down to refresh the data manually.
@@ -50,7 +60,7 @@ If using an OBD-II Bluetooth adapter:
 2. Ensure Bluetooth is enabled on your device
 3. Tap **Scan for Devices** to find your OBD adapter
 4. Select your adapter from the list to connect
-5. The app will automatically retry connection every 60 seconds if disconnected
+5. The app will automatically retry connection with exponential backoff if disconnected
 
 ### OBD PID Configuration
 
@@ -59,6 +69,28 @@ Configure which PIDs (Parameter IDs) to read from your vehicle:
 1. Go to **Settings > OBD PID Configuration**
 2. Select a **Verified Profile** if your vehicle is listed (e.g., XPENG G6)
 3. Or add **Custom PIDs** manually if you know the specific codes for your vehicle
+
+#### PID Priority System
+
+PIDs are categorized by polling priority to reduce OBD bus traffic:
+
+- **High Priority**: Polled every cycle (5 seconds) - essential real-time data like SOC, voltage, current, speed, and charging status
+- **Low Priority**: Polled every ~5 minutes - slowly changing data like SOH, odometer, cell voltages, cumulative charge/discharge
+
+This reduces OBD bus traffic by approximately 50% while keeping critical data fresh. Cached values from low-priority PIDs are used between polls.
+
+### Vehicle Model Selection
+
+Configure your vehicle model for accurate battery capacity:
+
+1. Go to **Settings > Vehicle**
+2. Select your XPENG G6 variant:
+   - **24LR**: 2024 Long Range / AWD (87.5 kWh)
+   - **24SR**: 2024 Standard Range (66.0 kWh)
+   - **25LR**: 2025 Long Range / AWD (80.8 kWh)
+   - **25SR**: 2025 Standard Range (68.5 kWh)
+
+This affects the "Guestimated Range" calculation on the dashboard.
 
 ### ABRP Integration
 
@@ -154,6 +186,9 @@ If you have Tailscale installed, XPCarData can connect and disconnect the VPN di
 
 **Note:** XPCarData uses Android intents to control Tailscale. The Tailscale app must be running (or have recently run) in the background for the connect/disconnect commands to work reliably.
 
+**VPN Status Detection:**
+The app automatically detects whether any VPN is active using Android's ConnectivityManager API. The VPN status icon on the dashboard will show green when a VPN connection (Tailscale or any other VPN) is active. Status is checked every 10 seconds.
+
 ### Alert Thresholds
 
 Configure alerts for battery conditions:
@@ -164,7 +199,7 @@ Configure alerts for battery conditions:
 
 ### Data Management
 
-- **Update Frequency**: How often to poll for new data (default: 2 seconds)
+- **Update Frequency**: How often to poll for new data (default: 5 seconds)
 - **Data Retention**: How long to keep historical data (default: 30 days)
 - **Export Data**: Export vehicle data logs for analysis
 - **Clear Data**: Delete all stored vehicle data
@@ -175,6 +210,34 @@ Configure alerts for battery conditions:
 - **Run in Background**: Keep collecting data when the app is minimized
 
 **Note:** You may need to allow "Run in background" or disable battery optimization for this app in your Android battery/app settings, depending on your Android version. The app will prompt for these permissions when you enable background service, but some devices require manual configuration in system settings.
+
+## Charging Detection
+
+XPCarData automatically detects when your vehicle is charging:
+
+### Detection Method
+
+1. **Primary**: HV Battery Current (HV_A) - negative current indicates charging
+   - Requires vehicle to be stationary (speed=0) for 2 consecutive samples
+   - This filters out regenerative braking which also shows negative current
+
+2. **Secondary**: BMS Charge Status, VCU Charging Status, DC Charge Status PIDs
+
+### AC vs DC Detection
+
+- **DC Charging**: Current magnitude >= 50A, or BMS status = 2
+- **AC Charging**: Current magnitude < 50A, or BMS status = 3
+
+### Charging Sessions
+
+The app automatically tracks charging sessions including:
+- Start/end time
+- Energy added (kWh)
+- SOC change
+- Charging type (AC/DC)
+- Peak power
+
+View charging history in **Settings > Charging History**.
 
 ## Troubleshooting
 
@@ -191,7 +254,16 @@ Configure alerts for battery conditions:
 2. Turn on the vehicle's ignition (accessory mode is usually sufficient)
 3. Check that Bluetooth is enabled on your device
 4. Try forgetting and re-pairing the OBD adapter in Bluetooth settings
-5. The app will automatically retry every 60 seconds if connection is lost
+5. The app will automatically retry with exponential backoff if connection is lost
+
+### Bluetooth Auto-Reconnect
+
+The app saves the last connected OBD device address in multiple locations for reliability:
+- Dedicated text file
+- JSON settings file
+- SharedPreferences
+
+On startup, it will automatically attempt to reconnect to the last known device.
 
 ### ABRP Not Updating
 
@@ -205,6 +277,22 @@ Configure alerts for battery conditions:
 1. Verify you have the correct PID configuration for your vehicle
 2. Check that the PID formulas match your vehicle's specifications
 3. Some PIDs may not be supported by all vehicle variants
+4. The app automatically migrates to the latest PID profile version when formulas are updated
+
+### Check for Updates
+
+The app can check for updates from GitHub releases:
+1. Go to **Settings > Updates**
+2. Tap **Check for Updates**
+3. If an update is available, you can download and install it directly
+
+**GitHub Rate Limiting:** If you see "rate limit exceeded" errors, you can add a GitHub personal access token:
+1. Go to **Settings > Updates > GitHub Token**
+2. Create a token at github.com → Settings → Developer settings → Personal access tokens
+3. Generate a new token (no scopes needed)
+4. Paste the token in the app
+
+This increases the API limit from 60 to 5000 requests per hour.
 
 ## Debug Log
 
@@ -212,7 +300,9 @@ Access the debug log via **Settings > Debug Log** to view:
 
 - Connection events
 - Data source changes
+- PID polling (high/low priority)
 - ABRP transmission status
+- Charging detection events
 - Error messages
 
 Use **Share Log** to export the log for troubleshooting.
@@ -220,7 +310,7 @@ Use **Share Log** to export the log for troubleshooting.
 ## Privacy & Data
 
 - Vehicle data is stored locally on your device
-- Data is only transmitted to external services (ABRP, MQTT) if you explicitly enable and configure them
+- Data is only transmitted to external services (ABRP, MQTT, Graylog) if you explicitly enable and configure them
 - No data is collected by the app developers
 
 ## Support
