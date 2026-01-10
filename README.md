@@ -1,175 +1,151 @@
-# CarSOC - Vehicle Battery Monitor
+# XPCarData - Battery Monitor for XPENG Vehicles
 
-A Flutter mobile app for Android Auto that monitors electric vehicle battery data (SOC, SOH, and more) and publishes to MQTT for cloud monitoring.
+A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Bluetooth, with integrations for ABRP, MQTT/Home Assistant, and anonymous Fleet Statistics.
 
-![Platform](https://img.shields.io/badge/platform-Android%20Auto-green)
+![Platform](https://img.shields.io/badge/platform-Android-green)
 ![Flutter](https://img.shields.io/badge/Flutter-3.x-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-orange)
 
 ## Features
 
-### 📱 Data Collection
-- **Android Automotive CarInfo API** - Direct access to vehicle data on AAOS devices
-- **OBD-II Support** - Bluetooth adapter for any Android device
-- **AI Box Compatible** - Run on Android AI boxes (e.g., Carlinkit) connected to your vehicle
-- **Mock Data** - Realistic simulation for testing
+### Real-time Battery Monitoring
+- State of Charge (SOC) %
+- State of Health (SOH) %
+- HV Battery Voltage, Current, Power
+- Max/Min Cell Voltages
+- Battery Temperature (Max/Min)
+- Coolant Temperatures (Battery, Motor)
+- DC Charging Voltage/Current/Power
+- Guestimated Range (calculated)
+- Speed, Odometer
 
-### 📊 Real-time Monitoring
-- Battery State of Charge (SOC) %
-- Battery State of Health (SOH) %
-- Battery Capacity (kWh)
-- Battery Voltage, Current, Temperature
-- Remaining Range (km)
-- Vehicle Speed (km/h)
-- Power Consumption (kW)
-- Odometer (km)
+### Integrations
+- **ABRP** - Live telemetry for A Better Route Planner
+- **MQTT** - Publish to any broker for home automation
+- **Home Assistant** - Auto-discovery creates entities automatically
+- **Fleet Statistics** - Anonymous, opt-in fleet-wide insights
 
-### 🚗 Android Auto Integration
-- **Dashboard Screen** - Grid view with 6 key metrics
-- **Detail Screen** - Complete vehicle data list
-- **Live Updates** - Automatic refresh every 2 seconds
-- **Color Coding** - Battery level indicators (green/yellow/red)
+### Data Sources
+- **OBD-II Bluetooth** - ELM327 compatible adapters
+- **CarInfo API** - For Android Automotive OS devices
+- **OBD Proxy** - Share data with external apps
 
-### ☁️ Cloud Publishing
-- **MQTT** - Real-time data streaming to remote broker
-- **QoS 1** - At-least-once delivery guarantee
-- **TLS Support** - Secure connections
-- **Auto-reconnect** - Exponential backoff
+### Additional Features
+- Background service for continuous monitoring
+- Charging session detection and history
+- Priority-based PID polling (reduces OBD traffic by ~50%)
+- Tailscale VPN control from settings
+- In-app updates via GitHub
+- Location services for enhanced ABRP data
+- Configurable alerts (low battery, high temperature)
 
-### 💾 Data Persistence
-- **SQLite Database** - Local time-series storage
-- **Historical Data** - Query by date range
-- **Alerts** - Low battery, high temperature warnings
+## Installation
+
+### Download
+Get the latest APK from the [releases](releases/) folder or check for updates in-app.
+
+**Current Version:** v1.1.0 (Build 35)
+
+### Requirements
+- Android 10 (API 29) or higher
+- OBD-II Bluetooth adapter (ELM327 v1.5+ compatible)
+- XPENG G6 (verified), other XPENG models may need PID adjustments
+
+### Platforms
+- Android phones and tablets
+- Android AI Boxes (e.g., Carlinkit) - ideal for in-car use
+- **Note:** Cannot be installed directly on XPENG's built-in infotainment
 
 ## Quick Start
 
-```bash
-# Install dependencies
-flutter pub get
+1. Install the APK on your Android device
+2. Plug OBD-II adapter into your vehicle
+3. Turn on vehicle ignition
+4. Open XPCarData → Settings → OBD-II Connection
+5. Scan and connect to your adapter
+6. Data will appear on the dashboard
 
-# Run the app (uses mock data automatically)
-flutter run
-```
+## Configuration
 
-The app will display simulated vehicle data updating every 2 seconds. See [TESTING.md](TESTING.md) for detailed testing instructions.
+### ABRP Integration
+1. Get your token from ABRP app → Settings → Car Model → Generic → Link to live data
+2. In XPCarData: Settings → ABRP → Enable and paste token
+3. Set update interval (minimum 5 seconds)
 
-## Testing
+### MQTT / Home Assistant
+1. Settings → MQTT → Enable
+2. Configure broker address (use Tailscale IP for remote access)
+3. Enable Home Assistant Discovery for automatic entity creation
+4. Entities appear under "XPCarData {Vehicle ID}" device
 
-For comprehensive testing instructions, see **[TESTING.md](TESTING.md)**, which covers:
+### Fleet Statistics
+1. Settings → Fleet Statistics → Enable
+2. Accept consent dialog (first time only)
+3. View aggregated fleet data: SOH distribution, charging patterns, country breakdown
 
-- ✅ Mock data testing (easiest - start here)
-- ✅ Android Auto Desktop Head Unit (DHU) setup
-- ✅ MQTT broker configuration and monitoring
-- ✅ Database verification
-- ✅ Performance testing
-- ✅ Troubleshooting tips
+**Privacy:** All data is anonymous and bucketed. No GPS, vehicle IDs, or personal info collected.
+
+## Documentation
+
+- [User Guide](docs/USER_GUIDE.md) - Complete feature documentation
+- [Release Notes](docs/RELEASE_NOTES.md) - Version history and changes
+- [PID Reference](docs/XPENG_G6_PIDs.md) - OBD-II PID configuration for XPENG G6
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
 │   Data Sources                                  │
+│   • OBD-II Bluetooth (primary)                 │
 │   • CarInfo API (AAOS)                         │
-│   • OBD-II Bluetooth                           │
-│   • Mock Data                                  │
+│   • OBD Proxy (external apps)                  │
 └──────────────┬──────────────────────────────────┘
                ↓
 ┌─────────────────────────────────────────────────┐
-│   DataSourceManager (Intelligent Fallback)      │
-└──┬────┬────┬────┬───────────────────────────┬──┘
-   ↓    ↓    ↓    ↓                           ↓
-  DB  MQTT  ABRP  Phone UI              Android Auto
+│   DataSourceManager (Intelligent Routing)       │
+└──┬────┬────┬────┬────┬──────────────────────┬──┘
+   ↓    ↓    ↓    ↓    ↓                      ↓
+  DB  MQTT  ABRP Fleet  Phone UI        Android Auto
+            Analytics
 ```
 
 ## Tech Stack
 
-- **Flutter** 3.10.4+ - Cross-platform framework
+- **Flutter** 3.x - Cross-platform framework
 - **Riverpod** - State management
-- **SQLite/sqflite** - Local database
+- **Firebase** - Analytics and Firestore for fleet statistics
+- **SQLite** - Local database
 - **mqtt_client** - MQTT publishing
-- **flutter_automotive** - CarInfo API access
-- **Android Car App Library** - Android Auto templates
-- **Kotlin** - Native Android code
+- **flutter_blue_plus** - Bluetooth OBD connection
 
-## Implementation Status
+## Version History
 
-### ✅ Completed
+### v1.1.0 (Current)
+- Fleet Statistics with anonymous data sharing
+- Charging session history
+- In-app updates via GitHub
+- Location services for ABRP
+- Country detection for fleet insights
 
-- [x] Data models and SQLite database
-- [x] CarInfo API service (flutter_automotive)
-- [x] MQTT service with auto-reconnect
-- [x] Mock data generator
-- [x] Data source manager with intelligent fallback
-- [x] Android Auto integration (CarAppService, Dashboard, Details)
-- [x] Method channel bridge (Flutter ↔ Native)
-- [x] Phone UI with live data display
-- [x] Automatic data flow (Source → DB → MQTT → Android Auto)
-- [x] OBD-II Bluetooth support with custom PIDs
-- [x] ABRP (A Better Route Planner) integration
-- [x] Settings UI (MQTT, ABRP, data sources, alerts)
-- [x] Background service for continuous monitoring
-- [x] Charging session detection
-
-### 🔧 Planned
-
-- [ ] Historical data charts
-- [ ] Notification service
-- [ ] Data export (CSV, JSON)
-
-## Project Structure
-
-```
-lib/
-├── main.dart                    # App entry point
-├── models/                      # Data models
-├── services/                    # Business logic
-│   ├── car_info_service.dart   # CarInfo API
-│   ├── mock_data_service.dart  # Mock data
-│   ├── mqtt_service.dart       # MQTT client
-│   ├── database_service.dart   # SQLite
-│   └── data_source_manager.dart # Orchestration
-├── providers/                   # Riverpod state
-└── screens/                     # UI screens
-
-android/app/src/main/kotlin/
-├── MainActivity.kt              # Method channel
-├── VehicleDataStore.kt          # Shared data
-├── CarAppService.kt             # Android Auto entry
-├── DashboardScreen.kt           # Car dashboard
-└── DetailListScreen.kt          # Car details
-```
-
-## Configuration
-
-### MQTT Settings (Temporary)
-
-Until Settings UI is implemented, edit `lib/providers/mqtt_provider.dart`:
-
-```dart
-factory MqttSettings.defaultSettings() {
-  return const MqttSettings(
-    broker: 'mqtt.eclipseprojects.io',
-    port: 1883,
-    vehicleId: 'vehicle_001',  // Change to unique ID
-    useTLS: false,
-  );
-}
-```
+### v1.0.x
+- Core OBD-II monitoring
+- ABRP and MQTT integration
+- Home Assistant auto-discovery
+- Priority-based PID polling
+- Charging detection
 
 ## Known Limitations
 
-- **CarInfo API** only works on Android Automotive OS (AAOS), not Android Auto projection
-- **OBD-II PIDs** are vehicle-specific; you may need to configure custom PIDs for your vehicle
-- **Battery SOH** may not be available on all vehicles
+- **Single BLE Connection**: Cannot use with ABRP's native OBD connection simultaneously (unless adapter supports multiple connections)
+- **Vehicle-Specific PIDs**: Configured for XPENG G6; other models may need adjustments
+- **CarInfo API**: Only works on Android Automotive OS, not Android Auto projection
 
-## Resources
+## Support
 
-- [TESTING.md](TESTING.md) - Complete testing guide
-- [Android Auto Developer Guide](https://developer.android.com/training/cars)
-- [CarInfo API Reference](https://developer.android.com/reference/android/car/VehiclePropertyIds)
-- [flutter_automotive Package](https://pub.dev/packages/flutter_automotive)
+For issues and feature requests: https://github.com/stevelea/xpcardata
 
 ---
 
-**Note:** This app works on Android Automotive OS (using CarInfo API) or any Android device with an OBD-II Bluetooth adapter. Can also run on an AI Box (e.g., Carlinkit) connected to your vehicle's head unit.
+**Tested on:** XPENG G6 (2023-2024 models)
 
-🚗⚡ Happy Monitoring!
+**Privacy:** Fleet Statistics is opt-in only. No personal data, GPS coordinates, or vehicle IDs are collected.
