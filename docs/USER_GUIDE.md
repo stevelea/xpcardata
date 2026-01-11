@@ -8,11 +8,26 @@ XPCarData is a battery monitoring app designed for XPENG electric vehicles. It d
 
 ### Installation
 
-1. Download the latest APK file: `XPCarData-v1.1.0-build35.apk`
+1. Download the latest APK file (e.g., `XPCarData-release-1.2.0+64.apk`)
 2. Enable "Install from unknown sources" in your Android settings if prompted
 3. Install the APK on your Android device
 
-**Note:** This app cannot be installed directly on XPENG's built-in infotainment system. It is ideally suited for Android AI Boxes (e.g., Carlinkit) but will also work on Android phones or tablets.
+**Note:** This app cannot be installed directly on XPENG's built-in infotainment system. It is ideally suited for Android AI Boxes (e.g., Carlinkit, Ottocast) but will also work on Android phones or tablets.
+
+### Android AI Box Users
+
+If you're running this app on an Android AI Box (devices that plug into your car's Android Auto/CarPlay interface):
+
+**Storage Behavior:**
+- AI boxes have restricted storage access - SQLite, SharedPreferences, and file storage may not work
+- The app automatically uses **in-memory storage** for charging sessions
+- Sessions are **published to MQTT/Home Assistant** for persistence across app restarts
+- Charging history will appear in the app during the current session and sync to Home Assistant
+
+**Recommended Setup:**
+1. Configure MQTT with Home Assistant discovery enabled
+2. Charging sessions will automatically appear as entities in Home Assistant
+3. Use Home Assistant for long-term charging history storage
 
 ### First Launch
 
@@ -141,6 +156,23 @@ Enable GPS location tracking:
 
 Location data is used to enrich ABRP telemetry and MQTT data. No location data is sent to Fleet Analytics.
 
+### Home Location
+
+Set your home location for automatic labeling of charging sessions:
+
+1. Go to **Settings > Location Services > Set Home Location**
+2. Enter your address or use current location
+3. Charging sessions near home will be automatically labeled "Home"
+
+### OpenChargeMap Integration
+
+The app automatically looks up charger names from OpenChargeMap when a charging session completes:
+
+- When charging ends, the app searches for chargers within 100m of your GPS location
+- If a charger is found, its name is stored with the session
+- Charger data is cached for 7 days to reduce API calls
+- Tap on a charging session location to open it in Maps
+
 ### MQTT Publishing
 
 To publish vehicle data to an MQTT broker:
@@ -265,11 +297,26 @@ XPCarData automatically detects when your vehicle is charging:
 ### Charging Sessions
 
 The app automatically tracks charging sessions including:
-- Start/end time
-- Energy added (kWh)
-- SOC change
+- Start/end time and duration
+- Energy added (kWh) - calculated via power integration for accuracy
+- SOC change (start % → end %)
 - Charging type (AC/DC)
-- Peak power
+- Peak power (kW)
+- Distance since last charge (for consumption calculation)
+
+**Session Storage:**
+- Sessions are stored using multiple methods for maximum compatibility:
+  1. In-memory (always works, including on AI boxes)
+  2. SQLite database (phones/tablets)
+  3. SharedPreferences (most Android devices)
+  4. File storage (fallback)
+- All sessions are published to MQTT for persistence in Home Assistant
+
+**Minimum Save Thresholds:**
+Sessions are only saved if they meet minimum criteria:
+- Energy added ≥ 0.1 kWh, OR
+- SOC gained ≥ 0.5%, OR
+- Charged with power for ≥ 1 minute
 
 View charging history in **Settings > Charging History**.
 

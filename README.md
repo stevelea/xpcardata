@@ -4,7 +4,7 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![Flutter](https://img.shields.io/badge/Flutter-3.x-blue)
-![Version](https://img.shields.io/badge/version-1.1.0-orange)
+![Version](https://img.shields.io/badge/version-1.2.0-orange)
 
 ## Features
 
@@ -33,18 +33,20 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 ### Additional Features
 - Background service for continuous monitoring
 - Charging session detection and history
+- **OpenChargeMap integration** - Auto-lookup charger names from GPS coordinates
 - Priority-based PID polling (reduces OBD traffic by ~50%)
 - Tailscale VPN control from settings
 - In-app updates via GitHub
 - Location services for enhanced ABRP data
 - Configurable alerts (low battery, high temperature)
+- Mock data mode for testing without vehicle connection
 
 ## Installation
 
 ### Download
 Get the latest APK from the [releases](releases/) folder or check for updates in-app.
 
-**Current Version:** v1.1.0 (Build 35)
+**Current Version:** v1.2.0 (Build 87)
 
 ### Requirements
 - Android 10 (API 29) or higher
@@ -120,7 +122,16 @@ Get the latest APK from the [releases](releases/) folder or check for updates in
 
 ## Version History
 
-### v1.1.0 (Current)
+### v1.2.0 (Current)
+- **OpenChargeMap integration** - Auto-lookup charger names from GPS coordinates
+- Improved maps integration with correct geo URI handling
+- Mock data mode for testing without vehicle connection
+- Home location setting for charging session tracking
+- Android AI Box compatibility with in-memory storage
+- Reliable DC charging detection using HV battery current
+- Energy accumulation via power integration
+
+### v1.1.0
 - Fleet Statistics with anonymous data sharing
 - Charging session history
 - In-app updates via GitHub

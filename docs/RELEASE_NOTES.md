@@ -1,5 +1,81 @@
 # XPCarData Release Notes
 
+## Version 1.2.0 (Build 87) - 2026-01-12
+
+### New Features
+
+- **OpenChargeMap Integration**: Automatic charger name lookup from GPS coordinates
+  - When a charging session completes, the app looks up the nearest charger within 100m
+  - Charger names from OpenChargeMap are stored with the session
+  - Cached for 7 days to reduce API calls
+
+- **Improved Maps Integration**: Fixed geo URI handling for correct location opening
+  - Maps now open at the exact charger location instead of searching
+  - Works with Google Maps, Waze, and other navigation apps
+
+- **Home Location Setting**: Set your home location for charging session tracking
+  - Sessions near home are automatically labeled "Home"
+  - Configure in Settings > Location Services
+
+- **Mock Data Mode**: Test the app without a vehicle connection
+  - Enable in Settings > Developer > Mock Data
+  - Simulates charging sessions and vehicle data
+
+### Bug Fixes
+
+- Fixed maps opening wrong locations (geo URI fix)
+- Fixed DC charging detection when BMS status is stale
+- Improved energy calculation accuracy via power integration
+
+---
+
+## Version 1.2.0 (Build 65) - 2026-01-11
+
+### Major Features
+
+- **Android AI Box Compatibility**: Full support for Android AI boxes (Carlinkit, Ottocast, etc.)
+  - In-memory session storage as primary storage method
+  - MQTT-based persistence for cross-session data
+  - Handles restricted storage access on AI box devices
+
+- **Reliable Charging Detection**: Completely rewritten charging detection logic
+  - Uses HV battery current (batteryCurrent/HV_A) as PRIMARY indicator
+  - Negative current = charging, resets to 0 when charging stops
+  - Ignores stale BMS_CHG_STATUS, AC_CHG_A, DC_CHG_A values
+  - Stationary check (speed < 1 km/h for 2 samples) prevents regen braking false positives
+  - AC vs DC determined by power level (>11kW = DC)
+
+- **Energy Accumulation**: Accurate kWh tracking via power integration
+  - Integrates power samples over time (kW × hours)
+  - Uses HV current × voltage for reliable power calculation
+  - SOC-based energy calculation as fallback
+
+### Improvements
+
+- **Database Initialization**: Multi-path fallback for SQLite
+  - Tries: Documents directory → Support directory → Default path
+  - Creates directories if missing
+  - Retry logic with delays
+
+- **Multi-tier Storage**: Cascading storage with automatic fallbacks
+  - Priority: In-memory → SQLite → SharedPreferences → File storage
+  - Each tier tries independently for maximum compatibility
+  - MQTT always publishes for Home Assistant persistence
+
+### Bug Fixes
+
+- Fixed charging detection not working when BMS_CHG_STATUS is stale
+- Fixed AC charging being detected as DC (BMS showed wrong type)
+- Fixed charging not stopping when cable unplugged (stale charger PIDs)
+- Fixed energy calculation using unreliable AC/DC charger values
+
+### Known Issues
+
+- **Stale PIDs**: BMS_CHG_STATUS, AC_CHG_A/V, DC_CHG_A/V do not reset after charging
+  - Mitigated by using HV battery current as primary indicator
+
+---
+
 ## Version 1.1.0 (Build 35) - 2026-01-10
 
 ### Major Features
@@ -214,15 +290,15 @@ All Fleet Analytics data is:
 
 ## Installation
 
-1. Download `XPCarData-v1.1.0-build35.apk`
+1. Download the latest APK (e.g., `XPCarData-release-1.2.0+64.apk`)
 2. Enable installation from unknown sources if prompted
 3. Install on your Android device (AI Box, phone, or tablet)
 
-**Note:** Cannot be installed directly on XPENG's built-in infotainment system. Ideally suited for Android AI boxes (e.g., Carlinkit).
+**Note:** Cannot be installed directly on XPENG's built-in infotainment system. Ideally suited for Android AI boxes (e.g., Carlinkit, Ottocast).
 
 ## File Locations
 
-- APK: `/Users/stevelea/CarSOC/XPCarData-v1.1.0-build35.apk`
+- APK: `build/app/outputs/apk/release/XPCarData-release-{version}+{build}.apk`
 - User Guide: `docs/USER_GUIDE.md`
 - Release Notes: `docs/RELEASE_NOTES.md`
 - PID Reference: `docs/XPENG_G6_PIDs.md`
