@@ -1,8 +1,12 @@
 # XPCarData Release Notes
 
-## Version 1.2.0 (Build 87) - 2026-01-12
+## Version 1.2.0 (Build 88) - 2026-01-12
 
 ### New Features
+
+- **Fleet Statistics Enhancement**: Added total contributions count
+  - Shows both number of contributors and total contributions
+  - Better visibility into fleet data participation
 
 - **OpenChargeMap Integration**: Automatic charger name lookup from GPS coordinates
   - When a charging session completes, the app looks up the nearest charger within 100m
