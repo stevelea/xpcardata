@@ -234,6 +234,24 @@ All entities are grouped under a single device called "XPCarData {Vehicle ID}" i
 - MQTT broker accessible from both Home Assistant and your vehicle/device
 - Discovery prefix must be `homeassistant` (default)
 
+### Companion: XPENG Charging History Integration
+
+For advanced charging history tracking in Home Assistant, install the companion custom component:
+
+**[XPENG Charging History Integration](https://github.com/stevelea/ha-xpeng-charging-history)**
+
+This Home Assistant custom integration provides:
+- **Persistent charging history storage** - Stores all charging sessions in Home Assistant
+- **Energy cost calculation** - Calculates costs based on configurable electricity rates
+- **Statistics dashboard** - Total energy, costs, and session history
+- **Lovelace cards** - Ready-to-use dashboard cards for displaying charging data
+
+**Installation:**
+1. Install via HACS (recommended) or manually copy to `custom_components/`
+2. Configure the integration in Home Assistant
+3. Enable MQTT publishing in XPCarData with Home Assistant Discovery
+4. Charging sessions will automatically sync to Home Assistant
+
 ### Tailscale VPN Control
 
 If you have Tailscale installed, XPCarData can connect and disconnect the VPN directly from settings, making it easy to establish a secure connection to your home network for MQTT.

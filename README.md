@@ -90,6 +90,8 @@ Get the latest APK from the [releases](releases/) folder or check for updates in
 3. Enable Home Assistant Discovery for automatic entity creation
 4. Entities appear under "XPCarData {Vehicle ID}" device
 
+**Companion Integration:** For advanced charging history tracking in Home Assistant, see the [XPENG Charging History Integration](https://github.com/stevelea/ha-xpeng-charging-history) - a custom component that stores and displays charging sessions with energy costs and statistics.
+
 ### Fleet Statistics
 1. Settings → Fleet Statistics → Enable
 2. Accept consent dialog (first time only)
