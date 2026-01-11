@@ -2,7 +2,7 @@
 
 ## Overview
 
-XPCarData is a battery monitoring app designed for XPENG electric vehicles. It displays real-time battery status, vehicle metrics, and can integrate with external services like ABRP (A Better Route Planner), MQTT brokers, Home Assistant, and Firebase for anonymous fleet statistics.
+XPCarData is an EV monitoring app designed for XPENG electric vehicles. It displays real-time battery status, vehicle metrics, and can integrate with external services like ABRP (A Better Route Planner), MQTT brokers, Home Assistant, and Firebase for anonymous fleet statistics.
 
 ## Getting Started
 
@@ -19,10 +19,11 @@ XPCarData is a battery monitoring app designed for XPENG electric vehicles. It d
 If you're running this app on an Android AI Box (devices that plug into your car's Android Auto/CarPlay interface):
 
 **Storage Behavior:**
-- AI boxes have restricted storage access - SQLite, SharedPreferences, and file storage may not work
+- Some AI boxes have restricted storage access - SQLite, SharedPreferences, and file storage may not work
 - The app automatically uses **in-memory storage** for charging sessions
 - Sessions are **published to MQTT/Home Assistant** for persistence across app restarts
 - Charging history will appear in the app during the current session and sync to Home Assistant
+- All efforts are made to persist the data on the device running the app
 
 **Recommended Setup:**
 1. Configure MQTT with Home Assistant discovery enabled
@@ -33,7 +34,7 @@ If you're running this app on an Android AI Box (devices that plug into your car
 
 When you first open XPCarData, the app will automatically attempt to connect to available data sources:
 
-- **CarInfo API** (Primary): Used on XPENG's Android Automotive OS
+
 - **OBD-II Bluetooth**: For connecting via an OBD-II adapter
 
 ## Main Dashboard
