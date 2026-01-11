@@ -6,6 +6,16 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 ![Flutter](https://img.shields.io/badge/Flutter-3.x-blue)
 ![Version](https://img.shields.io/badge/version-1.2.0-orange)
 
+## Screenshots
+
+| Dashboard | Charging History |
+|:-:|:-:|
+| ![Dashboard](docs/images/dashboard.png) | ![Charging History](docs/images/charging-history.png) |
+
+| Session Details | Settings |
+|:-:|:-:|
+| ![Session Details](docs/images/session-details.png) | ![Settings](docs/images/settings.png) |
+
 ## Features
 
 ### Real-time Battery Monitoring
