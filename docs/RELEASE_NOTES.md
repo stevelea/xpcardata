@@ -1,5 +1,16 @@
 # XPCarData Release Notes
 
+## Version 1.2.0 (Build 90) - 2026-01-12
+
+### Bug Fixes
+
+- **Fixed "Start Minimised" not working on manual launch**: Setting now works both on device boot AND when manually opening the app
+  - Previously only worked when device booted with the setting enabled
+  - Now respects the setting regardless of how the app is launched
+  - App minimizes to background after initialization when setting is enabled
+
+---
+
 ## Version 1.2.0 (Build 89) - 2026-01-12
 
 ### New Features
