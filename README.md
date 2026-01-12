@@ -4,7 +4,7 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![Flutter](https://img.shields.io/badge/Flutter-3.x-blue)
-![Version](https://img.shields.io/badge/version-1.2.0-orange)
+![Version](https://img.shields.io/badge/version-1.3.0-orange)
 
 ## Screenshots
 
@@ -41,6 +41,7 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 - **OBD Proxy** - Share data with external apps
 
 ### Additional Features
+- **Backup & Restore** - Export/import settings and charging history
 - Background service for continuous monitoring
 - Charging session detection and history
 - **OpenChargeMap integration** - Auto-lookup charger names from GPS coordinates
@@ -54,9 +55,13 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 ## Installation
 
 ### Download
-Get the latest APK from the [releases](releases/) folder or check for updates in-app.
+Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcardata/releases).
 
-**Current Version:** v1.2.1
+**Current Version:** v1.3.0
+
+1. Download `XPCarData-v1.3.0.zip` from the [latest release](https://github.com/stevelea/xpcardata/releases/latest)
+2. Extract the ZIP file to get `XPCarData-v1.3.0.apk`
+3. Install the APK on your Android device (enable "Install from unknown sources" if prompted)
 
 ### Requirements
 - Android 10 (API 29) or higher
@@ -65,7 +70,7 @@ Get the latest APK from the [releases](releases/) folder or check for updates in
 
 ### Platforms
 - Android phones and tablets
-- Android AI Boxes (e.g., Carlinkit) - ideal for in-car use
+- Android AI Boxes (e.g., Carlinkit, Ottocast) - ideal for in-car use
 - **Note:** Cannot be installed directly on XPENG's built-in infotainment
 
 ## Quick Start
@@ -73,7 +78,7 @@ Get the latest APK from the [releases](releases/) folder or check for updates in
 1. Install the APK on your Android device
 2. Plug OBD-II adapter into your vehicle
 3. Turn on vehicle ignition
-4. Open XPCarData → Settings → OBD-II Connection
+4. Open XPCarData → Settings → Connections → OBD-II Bluetooth
 5. Scan and connect to your adapter
 6. Data will appear on the dashboard
 
@@ -81,11 +86,11 @@ Get the latest APK from the [releases](releases/) folder or check for updates in
 
 ### ABRP Integration
 1. Get your token from ABRP app → Settings → Car Model → Generic → Link to live data
-2. In XPCarData: Settings → ABRP → Enable and paste token
+2. In XPCarData: Settings → Integrations → ABRP → Enable and paste token
 3. Set update interval (minimum 5 seconds)
 
 ### MQTT / Home Assistant
-1. Settings → MQTT → Enable
+1. Settings → Connections → MQTT → Enable
 2. Configure broker address (use Tailscale IP for remote access)
 3. Enable Home Assistant Discovery for automatic entity creation
 4. Entities appear under "XPCarData {Vehicle ID}" device
@@ -93,11 +98,16 @@ Get the latest APK from the [releases](releases/) folder or check for updates in
 **Companion Integration:** For advanced charging history tracking in Home Assistant, see the [XPENG Charging History Integration](https://github.com/stevelea/ha-xpeng-charging-history) - a custom component that stores and displays charging sessions with energy costs and statistics.
 
 ### Fleet Statistics
-1. Settings → Fleet Statistics → Enable
+1. Settings → Integrations → Fleet Statistics → Enable
 2. Accept consent dialog (first time only)
 3. View aggregated fleet data: SOH distribution, charging patterns, country breakdown
 
 **Privacy:** All data is anonymous and bucketed. No GPS, vehicle IDs, or personal info collected.
+
+### Backup & Restore
+1. Settings → Data → Backup & Restore
+2. **Save to Downloads** - Exports settings and charging history as JSON
+3. **Import from File** - Restore from a previously saved backup
 
 ## Documentation
 
@@ -134,7 +144,11 @@ Get the latest APK from the [releases](releases/) folder or check for updates in
 
 ## Version History
 
-### v1.2.0 (Current)
+### v1.3.0 (Current)
+- **Backup & Restore** - Export/import settings and charging history
+- **Reorganized Settings** - Category tiles for easier navigation (Connections, Integrations, Vehicle, Data, App, About)
+
+### v1.2.x
 - **OpenChargeMap integration** - Auto-lookup charger names from GPS coordinates
 - Improved maps integration with correct geo URI handling
 - Mock data mode for testing without vehicle connection
@@ -169,6 +183,6 @@ For issues and feature requests: https://github.com/stevelea/xpcardata
 
 ---
 
-**Tested on:** XPENG G6 (2023-2024 models)
+**Tested on:** XPENG G6 (2023-2025 models)
 
 **Privacy:** Fleet Statistics is opt-in only. No personal data, GPS coordinates, or vehicle IDs are collected.
