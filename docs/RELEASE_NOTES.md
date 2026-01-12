@@ -1,41 +1,27 @@
 # XPCarData Release Notes
 
-## Version 1.2.0 (Build 93) - 2026-01-12
+## Version 1.2.1 - 2026-01-12
 
 ### Improvements
+
+- **Switched to semantic versioning**: Now using patch versions (1.2.1, 1.2.2, etc.) instead of build numbers
+  - In-app update checker now correctly detects new releases
+  - Cleaner version display throughout the app
 
 - **Larger splash screen icon**: App icon now displays at 512x512 on splash screen
   - Scaled versions for all screen densities (mdpi through xxxhdpi)
   - Much more visible during app startup
 
----
-
-## Version 1.2.0 (Build 92) - 2026-01-12
-
-### Improvements
-
-- **In-app updates now support ZIP files**: GitHub releases can use compressed ZIP files (under 50MB limit)
+- **In-app updates support ZIP files**: GitHub releases use compressed ZIP files (under 50MB limit)
   - Automatically detects ZIP vs APK assets
-  - Downloads ZIP, extracts APK, installs
-  - Cleans up ZIP after extraction
-
-- **View Release Notes button**: Added "Notes" button in Settings when update is available
-  - Shows version, release date, size, and full release notes
-
----
-
-## Version 1.2.0 (Build 91) - 2026-01-12
-
-### Improvements
+  - Downloads ZIP, extracts APK, installs, cleans up
 
 - **Settings auto-save**: Boolean toggle settings now save immediately when changed
-  - No need to manually save after toggling MQTT, ABRP, Tailscale, etc.
 
 - **Tailscale auto-connect reliability**: Improved VPN auto-connect on app startup
-  - Now wakes Tailscale app first before sending connect intent
-  - Verifies VPN actually connected (polls status)
-  - Retries up to 3 times if connection doesn't establish
-  - Returns actual success/failure instead of just "intent sent"
+  - Wakes Tailscale app first, verifies VPN connected, retries up to 3x
+
+- **Start Minimised fix**: Setting now works on both device boot and manual app launch
 
 ---
 
