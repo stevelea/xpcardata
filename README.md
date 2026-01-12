@@ -56,7 +56,7 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 ### Download
 Get the latest APK from the [releases](releases/) folder or check for updates in-app.
 
-**Current Version:** v1.2.0 (Build 91)
+**Current Version:** v1.2.0 (Build 92)
 
 ### Requirements
 - Android 10 (API 29) or higher

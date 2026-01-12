@@ -1,5 +1,19 @@
 # XPCarData Release Notes
 
+## Version 1.2.0 (Build 92) - 2026-01-12
+
+### Improvements
+
+- **In-app updates now support ZIP files**: GitHub releases can use compressed ZIP files (under 50MB limit)
+  - Automatically detects ZIP vs APK assets
+  - Downloads ZIP, extracts APK, installs
+  - Cleans up ZIP after extraction
+
+- **View Release Notes button**: Added "Notes" button in Settings when update is available
+  - Shows version, release date, size, and full release notes
+
+---
+
 ## Version 1.2.0 (Build 91) - 2026-01-12
 
 ### Improvements
