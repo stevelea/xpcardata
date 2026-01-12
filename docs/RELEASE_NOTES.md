@@ -1,5 +1,20 @@
 # XPCarData Release Notes
 
+## Version 1.2.0 (Build 91) - 2026-01-12
+
+### Improvements
+
+- **Settings auto-save**: Boolean toggle settings now save immediately when changed
+  - No need to manually save after toggling MQTT, ABRP, Tailscale, etc.
+
+- **Tailscale auto-connect reliability**: Improved VPN auto-connect on app startup
+  - Now wakes Tailscale app first before sending connect intent
+  - Verifies VPN actually connected (polls status)
+  - Retries up to 3 times if connection doesn't establish
+  - Returns actual success/failure instead of just "intent sent"
+
+---
+
 ## Version 1.2.0 (Build 90) - 2026-01-12
 
 ### Bug Fixes
