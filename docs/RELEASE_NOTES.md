@@ -1,5 +1,15 @@
 # XPCarData Release Notes
 
+## Version 1.2.0 (Build 93) - 2026-01-12
+
+### Improvements
+
+- **Larger splash screen icon**: App icon now displays at 512x512 on splash screen
+  - Scaled versions for all screen densities (mdpi through xxxhdpi)
+  - Much more visible during app startup
+
+---
+
 ## Version 1.2.0 (Build 92) - 2026-01-12
 
 ### Improvements
