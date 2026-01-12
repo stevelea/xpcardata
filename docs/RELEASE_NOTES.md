@@ -1,5 +1,21 @@
 # XPCarData Release Notes
 
+## Version 1.2.0 (Build 89) - 2026-01-12
+
+### New Features
+
+- **Start Minimised**: App can now auto-start in the background on device boot
+  - Enable in Settings > App Behavior > Start Minimised
+  - Launches app on boot and immediately moves to background
+  - Useful for AI boxes to start data collection automatically
+  - Works with BOOT_COMPLETED and QUICKBOOT_POWERON intents
+
+### Bug Fixes
+
+- Fixed "Start Minimised" setting not working (was stored but never used)
+
+---
+
 ## Version 1.2.0 (Build 88) - 2026-01-12
 
 ### New Features
