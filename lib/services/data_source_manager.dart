@@ -741,6 +741,7 @@ class DataSourceManager {
   /// Call this during app startup
   Future<void> restoreLocationSetting() async {
     bool? enabled;
+    bool migratedFromFile = false;
 
     // Try Hive first (most reliable on AI boxes)
     final hive = HiveStorageService.instance;
@@ -748,7 +749,11 @@ class DataSourceManager {
       enabled = hive.getSetting<bool>('location_enabled');
       if (enabled != null) {
         _logger.log('[DataSourceManager] Location preference from Hive: $enabled');
+      } else {
+        _logger.log('[DataSourceManager] No location preference in Hive yet');
       }
+    } else {
+      _logger.log('[DataSourceManager] Hive not available');
     }
 
     // Try file fallback if Hive didn't have a value
@@ -760,16 +765,27 @@ class DataSourceManager {
           final data = jsonDecode(content) as Map<String, dynamic>;
           enabled = data['enabled'] as bool?;
           _logger.log('[DataSourceManager] Location preference from file: $enabled');
+          migratedFromFile = true;
         }
       } catch (e) {
         _logger.log('[DataSourceManager] Failed to read location preference from file: $e');
       }
     }
 
+    // Migrate file value to Hive for next time
+    if (migratedFromFile && enabled != null && hive.isAvailable) {
+      await hive.saveSetting('location_enabled', enabled);
+      _logger.log('[DataSourceManager] Migrated location preference to Hive: $enabled');
+    }
+
+    // Set the internal state directly without triggering another save
     if (enabled == true) {
       _logger.log('[DataSourceManager] Restoring location tracking from saved preference');
-      await setLocationEnabled(true);
+      _locationEnabled = true;
+      await _locationService.startTracking();
+      _logger.log('[DataSourceManager] Location tracking enabled (restored)');
     } else {
+      _locationEnabled = false;
       _logger.log('[DataSourceManager] Location tracking not enabled (preference: $enabled)');
     }
   }

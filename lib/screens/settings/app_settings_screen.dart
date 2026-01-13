@@ -55,24 +55,27 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
 
   /// Get effective location enabled state - use local state if set, otherwise read from Hive/DataSourceManager
   bool _getLocationEnabled() {
+    // If user has interacted with toggle, use local state
     if (_locationEnabled != null) {
+      debugPrint('[AppSettings] Using local state: $_locationEnabled');
       return _locationEnabled!;
     }
 
     // First access - try Hive first (most reliable on AI boxes)
     final hive = HiveStorageService.instance;
+    debugPrint('[AppSettings] Hive available: ${hive.isAvailable}');
     if (hive.isAvailable) {
       final hiveState = hive.getSetting<bool>('location_enabled');
+      debugPrint('[AppSettings] Hive location_enabled: $hiveState');
       if (hiveState != null) {
-        debugPrint('[AppSettings] Reading location from Hive: $hiveState');
         return hiveState;
       }
     }
 
-    // Fallback to DataSourceManager
+    // Fallback to DataSourceManager (it knows the runtime state)
     final dataSourceManager = ref.read(dataSourceManagerProvider);
     final state = dataSourceManager.isLocationEnabled;
-    debugPrint('[AppSettings] Reading location from DataSourceManager: $state');
+    debugPrint('[AppSettings] DataSourceManager.isLocationEnabled: $state');
     return state;
   }
 
