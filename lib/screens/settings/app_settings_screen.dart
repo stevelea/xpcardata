@@ -6,6 +6,9 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../providers/vehicle_data_provider.dart';
 import '../../services/github_update_service.dart' show GitHubUpdateService, appVersion;
 import '../../services/background_service.dart';
+import '../../services/theme_service.dart';
+import '../../theme/app_themes.dart';
+import '../../services/open_charge_map_service.dart';
 
 /// App settings sub-screen
 /// Includes: App Behavior, Updates, Alert Thresholds
@@ -22,6 +25,9 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
   bool _startMinimised = false;
   bool _backgroundServiceEnabled = false;
   bool _backgroundServiceAvailable = false;
+
+  // Location/GPS
+  bool _locationEnabled = false;
 
   // Alert Thresholds
   double _lowBatteryThreshold = 20.0;
@@ -42,6 +48,16 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
     _loadSettings();
     _checkBackgroundServiceAvailability();
     _loadVersion();
+    _loadLocationState();
+  }
+
+  void _loadLocationState() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final dataSourceManager = ref.read(dataSourceManagerProvider);
+      setState(() {
+        _locationEnabled = dataSourceManager.isLocationEnabled;
+      });
+    });
   }
 
   Future<void> _loadVersion() async {
@@ -562,6 +578,200 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
                       }
                     },
                     secondary: const Icon(Icons.sync),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Appearance Section (Theme)
+          _buildSectionHeader('Appearance'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Icon(Icons.palette, color: Theme.of(context).colorScheme.primary),
+                  const SizedBox(width: 12),
+                  const Text('Theme:', style: TextStyle(fontWeight: FontWeight.w500)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: AppThemeMode.values.map((mode) {
+                          final isSelected = ThemeService.instance.currentTheme == mode;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              avatar: Icon(mode.icon, size: 16),
+                              label: Text(mode.displayName, style: const TextStyle(fontSize: 12)),
+                              selected: isSelected,
+                              onSelected: (selected) {
+                                if (selected) {
+                                  ThemeService.instance.setTheme(mode);
+                                  setState(() {});
+                                }
+                              },
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // GPS/Location Section
+          _buildSectionHeader('Location'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SwitchListTile(
+                    title: const Text('Enable GPS Tracking'),
+                    subtitle: const Text('Track vehicle location via phone GPS'),
+                    value: _locationEnabled,
+                    onChanged: (value) async {
+                      final dataSourceManager = ref.read(dataSourceManagerProvider);
+                      final scaffoldMessenger = ScaffoldMessenger.of(context);
+                      final success = await dataSourceManager.setLocationEnabled(value);
+                      if (success) {
+                        setState(() => _locationEnabled = value);
+                      } else if (mounted) {
+                        scaffoldMessenger.showSnackBar(
+                          const SnackBar(
+                            content: Text('Failed to enable location - check permissions'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    },
+                    secondary: Icon(
+                      Icons.location_on,
+                      color: _locationEnabled ? Colors.teal : Colors.grey,
+                    ),
+                  ),
+                  const Divider(),
+                  Text(
+                    'When enabled, GPS coordinates are added to vehicle data and published via MQTT. '
+                    'Location is not sent to ABRP (it uses its own GPS).',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (_locationEnabled) ...[
+                    const SizedBox(height: 16),
+                    Builder(
+                      builder: (context) {
+                        final dataSourceManager = ref.watch(dataSourceManagerProvider);
+                        final lastLocation = dataSourceManager.locationService.lastLocation;
+                        if (lastLocation != null) {
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.teal.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.teal.withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.my_location, color: Colors.teal, size: 20),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    '${lastLocation.latitude.toStringAsFixed(5)}, ${lastLocation.longitude.toStringAsFixed(5)}',
+                                    style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        return const SizedBox.shrink();
+                      },
+                    ),
+                  ],
+                  const Divider(),
+                  // Home Location Setting
+                  ListTile(
+                    leading: Icon(
+                      Icons.home,
+                      color: OpenChargeMapService.instance.hasHomeLocation
+                          ? Colors.blue
+                          : Colors.grey,
+                    ),
+                    title: const Text('Home Location'),
+                    subtitle: Text(
+                      OpenChargeMapService.instance.hasHomeLocation
+                          ? 'Set - charging here shows as "Home"'
+                          : 'Not set',
+                    ),
+                    trailing: OpenChargeMapService.instance.hasHomeLocation
+                        ? IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () async {
+                              final scaffoldMessenger = ScaffoldMessenger.of(context);
+                              await OpenChargeMapService.instance.clearHomeLocation();
+                              setState(() {});
+                              if (mounted) {
+                                scaffoldMessenger.showSnackBar(
+                                  const SnackBar(content: Text('Home location cleared')),
+                                );
+                              }
+                            },
+                            tooltip: 'Clear home location',
+                          )
+                        : null,
+                  ),
+                  if (_locationEnabled) ...[
+                    const SizedBox(height: 8),
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        final dataSourceManager = ref.read(dataSourceManagerProvider);
+                        final scaffoldMessenger = ScaffoldMessenger.of(context);
+                        final location = dataSourceManager.locationService.lastLocation;
+                        if (location != null) {
+                          await OpenChargeMapService.instance.setHomeLocation(
+                            location.latitude,
+                            location.longitude,
+                            'Home',
+                          );
+                          setState(() {});
+                          if (mounted) {
+                            scaffoldMessenger.showSnackBar(
+                              const SnackBar(
+                                content: Text('Home location set to current position'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          }
+                        } else {
+                          scaffoldMessenger.showSnackBar(
+                            const SnackBar(
+                              content: Text('No GPS location available'),
+                              backgroundColor: Colors.orange,
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.my_location),
+                      label: const Text('Set Current Location as Home'),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Text(
+                    'Charging sessions at your home location will automatically be labeled "Home" instead of looking up a station name.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
