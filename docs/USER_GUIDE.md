@@ -282,6 +282,25 @@ Configure alerts for battery conditions:
 - **Critical Battery**: Alert when SOC is critically low (default: 10%)
 - **High Temperature**: Warning when battery temperature exceeds limit (default: 45°C)
 
+### 12V Battery Protection
+
+Protect your auxiliary (12V) battery from depletion during extended OBD monitoring:
+
+1. Go to **Settings > App > 12V Battery Protection**
+2. Enable **12V Battery Protection** (enabled by default)
+3. Set the **Minimum 12V Voltage** threshold (11.0V - 13.0V, default: 12.5V)
+
+**How it works:**
+- The app monitors the 12V auxiliary battery voltage (AUX_V PID) every 5 seconds
+- When voltage drops below the threshold, OBD polling automatically pauses
+- Polling resumes when voltage recovers above threshold + 0.3V (hysteresis prevents rapid toggling)
+- Protection status is logged to the debug log
+
+**Typical voltages:**
+- Engine off, accessories on: 12.0V - 12.6V
+- Engine running / charging: 13.5V - 14.5V
+- Low battery warning: Below 12.0V
+
 ### Data Management
 
 - **Update Frequency**: How often to poll for new data (default: 5 seconds)

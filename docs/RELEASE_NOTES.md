@@ -1,5 +1,60 @@
 # XPCarData Release Notes
 
+## Version 1.3.1 - 2026-01-13
+
+### New Features
+
+- **12V Battery Protection**: Monitors auxiliary battery voltage to prevent depletion
+  - Configurable voltage threshold (11.0V - 13.0V, default 12.5V)
+  - Automatically pauses OBD polling when 12V drops below threshold
+  - Resumes polling when voltage recovers (with 0.3V hysteresis)
+  - Enable/disable in Settings > App > 12V Battery Protection
+
+- **Tablet-Optimized Settings**: Settings screen now scales properly for tablets
+  - 3-column layout on tablets (vs 2 on phones)
+  - Proportionally sized icons and spacing
+
+### Improvements
+
+- AUX_V (12V voltage) PID now polled every 5 seconds (was 5 minutes) for faster protection response
+
+---
+
+## Version 1.3.0 - 2026-01-12
+
+### New Features
+
+- **Backup & Restore**: Export and import app settings and charging history
+  - Save backup to Downloads folder as JSON file
+  - Copy backup to clipboard for easy sharing
+  - Import from file picker
+  - Includes all settings, API keys, and charging session history
+
+- **Reorganized Settings**: Settings screen now uses category tiles for easier navigation
+  - **Connections**: MQTT, Tailscale VPN, OBD Proxy, Data Sources
+  - **Integrations**: ABRP, Fleet Statistics
+  - **Vehicle**: Model selection, Location services, Home location, LHD/RHD layout
+  - **Data**: Backup/Restore, Data Management, Data Usage statistics
+  - **App**: Behavior settings, Alert thresholds, Updates
+  - **About**: Version info, Debug mode, Mock data
+
+### Improvements
+
+- Cleaner settings organization with dedicated sub-screens
+- Settings tiles optimized for various screen sizes
+- Each setting category is now self-contained and easier to find
+
+---
+
+## Version 1.2.2 - 2026-01-12
+
+### Bug Fixes
+
+- **Fixed GitHub update repository**: Now correctly checks `stevelea/xpcardata` for updates
+  - Previously was pointing to wrong repository
+
+---
+
 ## Version 1.2.1 - 2026-01-12
 
 ### Improvements
