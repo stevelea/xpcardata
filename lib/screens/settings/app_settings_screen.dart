@@ -1,5 +1,3 @@
-import 'dart:io';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,9 +26,9 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
   bool _backgroundServiceEnabled = false;
   bool _backgroundServiceAvailable = false;
 
-  // Location/GPS - initialized to true to match likely state, will be updated in initState
+  // Location/GPS - managed via DataSourceManager, local state for UI only
   bool _locationEnabled = false;
-  bool _locationStateLoaded = false;
+  bool _locationStateInitialized = false;
 
   // Alert Thresholds
   double _lowBatteryThreshold = 20.0;
@@ -51,61 +49,20 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
     _loadSettings();
     _checkBackgroundServiceAvailability();
     _loadVersion();
-    // Initialize location state SYNCHRONOUSLY from DataSourceManager first
-    // This is critical - the async method runs AFTER the first build,
-    // so we need to set the initial value before the first render
-    _initLocationStateSynchronously();
-    // Then run async to check file fallback if needed
-    _loadLocationStateAsync();
+    // Location state will be initialized in build() from DataSourceManager
+    // This ensures ref is properly available
   }
 
-  /// Initialize location state synchronously from DataSourceManager
-  /// This runs BEFORE the first build, so the UI shows the correct initial state
-  void _initLocationStateSynchronously() {
-    try {
-      final dataSourceManager = ref.read(dataSourceManagerProvider);
-      final managerState = dataSourceManager.isLocationEnabled;
-      debugPrint('[AppSettings] SYNC init: DataSourceManager.isLocationEnabled = $managerState');
-      _locationEnabled = managerState;
-      _locationStateLoaded = managerState; // If true, we're done
-    } catch (e) {
-      debugPrint('[AppSettings] SYNC init failed: $e');
-    }
-  }
+  /// Initialize location state from DataSourceManager - called from build() on first run
+  void _initializeLocationState() {
+    if (_locationStateInitialized) return;
+    _locationStateInitialized = true;
 
-  /// Load location state asynchronously - fallback to file if DataSourceManager says false
-  Future<void> _loadLocationStateAsync() async {
-    debugPrint('[AppSettings] ASYNC loading location state...');
-
-    // If already enabled from sync init, no need to check file
-    if (_locationEnabled) {
-      debugPrint('[AppSettings] Already enabled from sync init, skipping file check');
-      return;
-    }
-
-    // DataSourceManager says false - check file as fallback (might be cold start)
-    try {
-      final file = File('/data/data/com.example.carsoc/files/location_setting.json');
-      final exists = await file.exists();
-      debugPrint('[AppSettings] File exists: $exists');
-
-      if (exists) {
-        final content = await file.readAsString();
-        debugPrint('[AppSettings] File content: $content');
-        final json = jsonDecode(content);
-        final enabled = json['enabled'] as bool? ?? false;
-        debugPrint('[AppSettings] Parsed enabled from file = $enabled');
-
-        if (enabled && mounted) {
-          setState(() {
-            _locationEnabled = true;
-            _locationStateLoaded = true;
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint('[AppSettings] Failed to load location state from file: $e');
-    }
+    // Read directly from DataSourceManager - it knows the current state
+    final dataSourceManager = ref.read(dataSourceManagerProvider);
+    final managerState = dataSourceManager.isLocationEnabled;
+    debugPrint('[AppSettings] Initializing location from DataSourceManager: $managerState');
+    _locationEnabled = managerState;
   }
 
   Future<void> _loadVersion() async {
@@ -512,6 +469,9 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final dataSourceManager = ref.watch(dataSourceManagerProvider);
+
+    // Initialize location state on first build - this ensures ref is available
+    _initializeLocationState();
 
     return Scaffold(
       appBar: AppBar(
