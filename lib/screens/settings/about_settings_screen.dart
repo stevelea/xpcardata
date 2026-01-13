@@ -120,9 +120,16 @@ class _AboutSettingsScreenState extends ConsumerState<AboutSettingsScreen> {
                   subtitle: const Text('support@xpcardata.com'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () async {
-                    final uri = Uri.parse('mailto:support@xpcardata.com?subject=XPCarData%20Support');
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri);
+                    final scaffoldMessenger = ScaffoldMessenger.of(context);
+                    try {
+                      final uri = Uri.parse('mailto:support@xpcardata.com?subject=XPCarData%20Support');
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    } catch (e) {
+                      if (mounted) {
+                        scaffoldMessenger.showSnackBar(
+                          SnackBar(content: Text('Could not open email: $e')),
+                        );
+                      }
                     }
                   },
                 ),
@@ -133,9 +140,16 @@ class _AboutSettingsScreenState extends ConsumerState<AboutSettingsScreen> {
                   subtitle: const Text('Report issues & contribute'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () async {
-                    final uri = Uri.parse('https://github.com/stevelea/xpcardata');
-                    if (await canLaunchUrl(uri)) {
+                    final scaffoldMessenger = ScaffoldMessenger.of(context);
+                    try {
+                      final uri = Uri.parse('https://github.com/stevelea/xpcardata');
                       await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    } catch (e) {
+                      if (mounted) {
+                        scaffoldMessenger.showSnackBar(
+                          SnackBar(content: Text('Could not open browser: $e')),
+                        );
+                      }
                     }
                   },
                 ),
