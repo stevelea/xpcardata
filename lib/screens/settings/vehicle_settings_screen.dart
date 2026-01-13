@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/vehicle_data_provider.dart';
 import '../../services/open_charge_map_service.dart';
+import '../../services/hive_storage_service.dart';
 
 /// Vehicle settings sub-screen
 /// Includes: Vehicle Model, Location Services
@@ -15,7 +16,7 @@ class VehicleSettingsScreen extends ConsumerStatefulWidget {
 
 class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
   String _vehicleModel = '24LR';
-  bool _locationEnabled = false;
+  bool? _locationEnabled; // null = not yet loaded, use Hive/DataSourceManager
 
   static const Map<String, double> _batteryCapacities = {
     '24LR': 87.5,
@@ -42,11 +43,32 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
         _vehicleModel = prefs.getString('vehicle_model') ?? '24LR';
-        _locationEnabled = prefs.getBool('location_enabled') ?? false;
+        // Location is loaded via _getLocationEnabled() from Hive/DataSourceManager
       });
     } catch (e) {
       debugPrint('Failed to load settings: $e');
     }
+  }
+
+  /// Get effective location enabled state - use local state if set, otherwise read from Hive/DataSourceManager
+  bool _getLocationEnabled() {
+    // If user has interacted with toggle, use local state
+    if (_locationEnabled != null) {
+      return _locationEnabled!;
+    }
+
+    // Try Hive first (most reliable on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      final hiveState = hive.getSetting<bool>('location_enabled');
+      if (hiveState != null) {
+        return hiveState;
+      }
+    }
+
+    // Fallback to DataSourceManager (it knows the runtime state)
+    final dataSourceManager = ref.read(dataSourceManagerProvider);
+    return dataSourceManager.isLocationEnabled;
   }
 
   Future<void> _autoSaveString(String key, String value) async {
@@ -153,7 +175,7 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
                   SwitchListTile(
                     title: const Text('Enable GPS Tracking'),
                     subtitle: const Text('Track vehicle location via phone GPS'),
-                    value: _locationEnabled,
+                    value: _getLocationEnabled(),
                     onChanged: (value) async {
                       final scaffoldMessenger = ScaffoldMessenger.of(context);
                       final success = await dataSourceManager.setLocationEnabled(value);
@@ -170,7 +192,7 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
                     },
                     secondary: Icon(
                       Icons.location_on,
-                      color: _locationEnabled ? Colors.teal : Colors.grey,
+                      color: _getLocationEnabled() ? Colors.teal : Colors.grey,
                     ),
                   ),
                   const Divider(),
@@ -181,7 +203,7 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  if (_locationEnabled) ...[
+                  if (_getLocationEnabled()) ...[
                     const SizedBox(height: 16),
                     Builder(
                       builder: (context) {
@@ -243,7 +265,7 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
                           )
                         : null,
                   ),
-                  if (_locationEnabled) ...[
+                  if (_getLocationEnabled()) ...[
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: ElevatedButton.icon(
