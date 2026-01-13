@@ -7,6 +7,7 @@ import '../providers/mqtt_provider.dart';
 import '../services/open_charge_map_service.dart';
 import '../services/mock_data_service.dart';
 import '../services/native_url_launcher.dart';
+import '../widgets/charging_curve_chart.dart';
 
 /// Screen displaying charging history with consumption tracking
 class ChargingHistoryScreen extends ConsumerStatefulWidget {
@@ -711,6 +712,21 @@ class _SessionDetailsSheetState extends State<_SessionDetailsSheet> {
                     ],
                   ),
                 ],
+              ),
+            ],
+            // Charging Curve Chart
+            if (session.chargingCurve != null && session.chargingCurve!.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              const Divider(),
+              const SizedBox(height: 16),
+              const Text(
+                'Charging Curve',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              ChargingCurveChart(
+                samples: session.chargingCurve!,
+                chargingType: session.chargingType,
               ),
             ],
             const SizedBox(height: 16),

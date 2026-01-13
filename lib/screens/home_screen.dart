@@ -253,6 +253,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
                   _buildStatusBar(currentDataSource, vehicleDataAsync, isTablet),
                   SizedBox(height: isTablet ? 20 : 12),
 
+                  // 12V Battery Protection Warning Banner
+                  _build12VProtectionWarning(),
+
                   // Vehicle data display
                   vehicleDataAsync.when(
                     data: (data) {
@@ -287,6 +290,76 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
             ),
           );
         },
+      ),
+    );
+  }
+
+  /// Build 12V battery protection warning banner (flashing red)
+  Widget _build12VProtectionWarning() {
+    final manager = ref.watch(dataSourceManagerProvider);
+
+    if (!manager.isAuxBatteryProtectionActive) {
+      return const SizedBox.shrink();
+    }
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 500),
+      builder: (context, value, child) {
+        // Create a pulsing effect
+        final opacity = 0.7 + 0.3 * (0.5 + 0.5 * (value < 0.5 ? value * 2 : (1 - value) * 2));
+        return Opacity(
+          opacity: opacity,
+          child: child,
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.red.shade700,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.red.withOpacity(0.4),
+              blurRadius: 8,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            const _FlashingIcon(
+              icon: Icons.battery_alert,
+              color: Colors.white,
+              size: 28,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '12V BATTERY PROTECTION ACTIVE',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'OBD polling paused to protect 12V battery',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.9),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -524,11 +597,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
     final current = data.batteryCurrent?.toStringAsFixed(1) ?? '--';
     final power = data.power?.toStringAsFixed(1) ?? '--';
 
+    // 12V auxiliary battery voltage
+    final auxVoltage = data.additionalProperties?['AUX_V'] as double?;
+    final auxVoltageStr = auxVoltage?.toStringAsFixed(1) ?? '--';
+    // Color based on 12V voltage level
+    final auxVoltageColor = auxVoltage == null
+        ? Colors.grey
+        : auxVoltage < 12.0
+            ? Colors.red
+            : auxVoltage < 12.5
+                ? Colors.orange
+                : Colors.green;
+
     final metrics = [
       // Guestimated Range moved from primary display (swapped with Speed)
       _MetricData('Guestimated Range', estimatedRange?.toStringAsFixed(0) ?? '--', 'km', Icons.route, Colors.green),
       _MetricData('State of Health', data.stateOfHealth?.toStringAsFixed(1) ?? '--', '%', Icons.health_and_safety, Colors.teal),
       _MetricData('Battery Temp', data.batteryTemperature?.toStringAsFixed(1) ?? '--', '°C', Icons.thermostat, Colors.orange),
+      _MetricData('12V Battery', auxVoltageStr, 'V', Icons.battery_full, auxVoltageColor),
       _MetricData('Cell ΔV', cellVoltageDelta, 'mV', Icons.battery_std, Colors.cyan),
       _MetricData('Odometer', data.odometer?.toStringAsFixed(0) ?? '--', 'km', Icons.straighten, Colors.blueGrey),
     ];
@@ -537,7 +623,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
     final List<Widget> gridChildren = [];
     for (int i = 0; i < metrics.length; i++) {
       final m = metrics[i];
-      // Insert PowerMetricCard after Battery Temp (index 2 -> position 3)
+      // Insert PowerMetricCard after Battery Temp (index 2), before 12V Battery (index 3)
       if (i == 3) {
         gridChildren.add(PowerMetricCard(
           voltage: voltage,
@@ -1333,4 +1419,59 @@ class _MetricData {
   final Color color;
 
   const _MetricData(this.title, this.value, this.unit, this.icon, this.color);
+}
+
+/// Flashing icon widget for alerts
+class _FlashingIcon extends StatefulWidget {
+  final IconData icon;
+  final Color color;
+  final double size;
+
+  const _FlashingIcon({
+    required this.icon,
+    required this.color,
+    this.size = 24,
+  });
+
+  @override
+  State<_FlashingIcon> createState() => _FlashingIconState();
+}
+
+class _FlashingIconState extends State<_FlashingIcon>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 600),
+      vsync: this,
+    )..repeat(reverse: true);
+    _animation = Tween<double>(begin: 0.3, end: 1.0).animate(_controller);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        return Opacity(
+          opacity: _animation.value,
+          child: Icon(
+            widget.icon,
+            color: widget.color,
+            size: widget.size,
+          ),
+        );
+      },
+    );
+  }
 }

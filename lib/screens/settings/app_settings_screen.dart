@@ -96,6 +96,25 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
+    final hive = HiveStorageService.instance;
+
+    // Try Hive first (works on AI boxes)
+    if (hive.isAvailable) {
+      setState(() {
+        _updateFrequencySeconds = hive.getSetting<int>('update_frequency_seconds') ?? 2;
+        _startMinimised = hive.getSetting<bool>('start_minimised') ?? false;
+        _backgroundServiceEnabled = hive.getSetting<bool>('background_service_enabled') ?? false;
+        _lowBatteryThreshold = hive.getSetting<double>('alert_low_battery') ?? 20.0;
+        _criticalBatteryThreshold = hive.getSetting<double>('alert_critical_battery') ?? 10.0;
+        _highTempThreshold = hive.getSetting<double>('alert_high_temp') ?? 45.0;
+        _auxBatteryProtectionEnabled = hive.getSetting<bool>('aux_battery_protection_enabled') ?? true;
+        _auxBatteryProtectionThreshold = hive.getSetting<double>('aux_battery_protection_threshold') ?? 12.5;
+      });
+      debugPrint('[AppSettings] Loaded settings from Hive');
+      return;
+    }
+
+    // Fallback to SharedPreferences
     try {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
@@ -108,35 +127,60 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
         _auxBatteryProtectionEnabled = prefs.getBool('aux_battery_protection_enabled') ?? true;
         _auxBatteryProtectionThreshold = prefs.getDouble('aux_battery_protection_threshold') ?? 12.5;
       });
+      debugPrint('[AppSettings] Loaded settings from SharedPreferences');
     } catch (e) {
-      debugPrint('Failed to load settings: $e');
+      debugPrint('[AppSettings] Failed to load settings: $e');
     }
   }
 
   Future<void> _autoSaveInt(String key, int value) async {
+    // Save to Hive first (works on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      await hive.saveSetting(key, value);
+      debugPrint('[AppSettings] Saved $key to Hive');
+    }
+
+    // Also try SharedPreferences as backup
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(key, value);
     } catch (e) {
-      debugPrint('Failed to save $key: $e');
+      debugPrint('[AppSettings] SharedPreferences save failed for $key: $e');
     }
   }
 
   Future<void> _autoSaveBool(String key, bool value) async {
+    // Save to Hive first (works on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      await hive.saveSetting(key, value);
+      debugPrint('[AppSettings] Saved $key to Hive');
+    }
+
+    // Also try SharedPreferences as backup
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(key, value);
     } catch (e) {
-      debugPrint('Failed to save $key: $e');
+      debugPrint('[AppSettings] SharedPreferences save failed for $key: $e');
     }
   }
 
   Future<void> _autoSaveDouble(String key, double value) async {
+    // Save to Hive first (works on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      await hive.saveSetting(key, value);
+      debugPrint('[AppSettings] Saved $key to Hive');
+    }
+
+    // Also try SharedPreferences as backup
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setDouble(key, value);
     } catch (e) {
-      debugPrint('Failed to save $key: $e');
+      debugPrint('[AppSettings] SharedPreferences save failed for $key: $e');
     }
   }
 
@@ -858,6 +902,9 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
                     onChanged: (value) {
                       setState(() => _auxBatteryProtectionEnabled = value);
                       _autoSaveBool('aux_battery_protection_enabled', value);
+                      // Update DataSourceManager to clear active protection if disabled
+                      final dataSourceManager = ref.read(dataSourceManagerProvider);
+                      dataSourceManager.updateAuxBatteryProtectionSettings(enabled: value);
                     },
                     secondary: Icon(
                       Icons.battery_alert,
@@ -882,6 +929,9 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
                       onChanged: (value) {
                         setState(() => _auxBatteryProtectionThreshold = value);
                         _autoSaveDouble('aux_battery_protection_threshold', value);
+                        // Update DataSourceManager to clear active protection if threshold lowered
+                        final dataSourceManager = ref.read(dataSourceManagerProvider);
+                        dataSourceManager.updateAuxBatteryProtectionSettings(threshold: value);
                       },
                     ),
                     Padding(

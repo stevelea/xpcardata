@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vehicle_data.dart';
 import '../models/charging_session.dart';
+import '../models/charging_sample.dart';
 import '../providers/vehicle_data_provider.dart' show vehicleBatteryCapacities;
 import 'debug_logger.dart';
 import 'mqtt_service.dart';
@@ -66,6 +67,14 @@ class ChargingSessionService {
   // Track consecutive non-charging samples to detect charging end
   int _nonChargingSampleCount = 0;
   static const int _requiredNonChargingSamples = 2; // 2 consecutive samples with no charging indicators
+
+  // Charging curve sample collection
+  List<ChargingSample> _currentSessionSamples = [];
+  DateTime? _lastCurveSampleTime;
+  double? _lastSampledSoc;
+  static const int _curveSampleIntervalSeconds = 30; // Sample every 30 seconds
+  static const int _maxSamplesPerSession = 120; // Max ~1 hour of data at 30s intervals
+  static const double _minSocChangeForSample = 0.5; // Or sample if SOC changed by 0.5%
 
   // Thresholds for detection
   static const double _chargingCurrentThreshold = 0.5; // Amps (positive = discharging, negative = charging)
@@ -440,6 +449,14 @@ class ChargingSessionService {
     // Initialize peak SOC tracking with start SOC
     _peakSocDuringSession = data.stateOfCharge ?? 0;
 
+    // Reset charging curve samples for new session
+    _currentSessionSamples = [];
+    _lastCurveSampleTime = null;
+    _lastSampledSoc = null;
+
+    // Take initial sample immediately
+    _collectChargingCurveSample(data, powerKw);
+
     // Use current odometer, or fall back to last known odometer if current is null/0
     final currentOdo = data.odometer;
     final startOdo = (currentOdo != null && currentOdo > 0) ? currentOdo : (_lastKnownOdometer ?? 0);
@@ -580,6 +597,10 @@ class ChargingSessionService {
       }
     }
 
+    // Take final charging curve sample
+    _collectChargingCurveSample(data, _chargePowerKw);
+    _logger.log('[Charging] Curve complete with ${_currentSessionSamples.length} samples');
+
     // Use peak SOC if it's higher than final sample (handles stale end-of-session data)
     final finalSoc = data.stateOfCharge ?? _currentSession!.startSoc;
     final effectiveEndSoc = (_peakSocDuringSession > finalSoc) ? _peakSocDuringSession : finalSoc;
@@ -599,6 +620,7 @@ class ChargingSessionService {
       endOdometer: endOdo,
       averageVoltage: _lastVoltage,
       previousOdometer: _previousSessionEndOdometer,
+      chargingCurve: _currentSessionSamples.isNotEmpty ? List.from(_currentSessionSamples) : null,
     );
 
     // Use accumulated energy if energyAddedKwh is null or zero
@@ -729,10 +751,67 @@ class ChargingSessionService {
     _accumulatedEnergyKwh = 0.0;
     _lastPowerSampleTime = null;
 
+    // Clear charging curve samples
+    _currentSessionSamples = [];
+    _lastCurveSampleTime = null;
+    _lastSampledSoc = null;
+
     _currentSession = null;
   }
 
   /// Update active session with current values
+  /// Collect a charging curve sample for visualization
+  /// Samples are taken every 30 seconds or when SOC changes by 0.5%+
+  void _collectChargingCurveSample(VehicleData data, double powerKw) {
+    final now = data.timestamp;
+    final currentSoc = data.stateOfCharge ?? 0;
+
+    // Check if we should take a sample
+    bool shouldSample = false;
+
+    if (_lastCurveSampleTime == null) {
+      // First sample - always take it
+      shouldSample = true;
+    } else {
+      final secondsSinceLastSample = now.difference(_lastCurveSampleTime!).inSeconds;
+
+      // Sample if interval elapsed
+      if (secondsSinceLastSample >= _curveSampleIntervalSeconds) {
+        shouldSample = true;
+      }
+
+      // Or sample if SOC changed significantly
+      if (_lastSampledSoc != null &&
+          (currentSoc - _lastSampledSoc!).abs() >= _minSocChangeForSample) {
+        shouldSample = true;
+      }
+    }
+
+    if (!shouldSample) return;
+
+    // Enforce max samples limit
+    if (_currentSessionSamples.length >= _maxSamplesPerSession) {
+      return;
+    }
+
+    // Create and store the sample
+    final sample = ChargingSample(
+      timestamp: now,
+      soc: currentSoc,
+      powerKw: powerKw,
+      temperature: data.batteryTemperature,
+      voltage: data.batteryVoltage,
+      current: data.batteryCurrent,
+    );
+
+    _currentSessionSamples.add(sample);
+    _lastCurveSampleTime = now;
+    _lastSampledSoc = currentSoc;
+
+    _logger.log('[Charging] Curve sample #${_currentSessionSamples.length}: '
+        'SOC=${currentSoc.toStringAsFixed(1)}%, Power=${powerKw.toStringAsFixed(1)}kW');
+  }
+
   void _updateActiveSession(VehicleData data, ChargingType type, double powerKw) {
     if (_currentSession == null) return;
 
@@ -753,6 +832,9 @@ class ChargingSessionService {
     if (currentSoc > _peakSocDuringSession) {
       _peakSocDuringSession = currentSoc;
     }
+
+    // Collect charging curve sample (for visualization)
+    _collectChargingCurveSample(data, powerKw);
 
     // Update max power if current power is higher
     // IMPORTANT: Preserve latitude/longitude when recreating the session object

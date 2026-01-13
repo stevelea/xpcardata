@@ -374,31 +374,52 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
   }
 
   Future<void> _initializeAbrp() async {
-    Map<String, dynamic>? settings;
+    bool abrpEnabled = false;
+    String abrpToken = '';
+    String abrpCarModel = 'xpeng:g6:23:87:other';
+    int abrpInterval = 60;
 
-    // Try to load settings from file first (more reliable)
-    settings = await _loadSettingsFromFile();
-
-    // If file failed, try SharedPreferences
-    if (settings == null) {
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        settings = {
-          'abrp_enabled': prefs.getBool('abrp_enabled') ?? false,
-          'abrp_token': prefs.getString('abrp_token') ?? '',
-          'abrp_car_model': prefs.getString('abrp_car_model') ?? 'xpeng:g6:23:87:other',
-          'abrp_interval_seconds': prefs.getInt('abrp_interval_seconds') ?? 60,
-        };
-      } catch (e) {
-        print('SharedPreferences failed for ABRP: $e');
-        return;
+    // Try Hive first (works on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      abrpEnabled = hive.getSetting<bool>('abrp_enabled') ?? false;
+      abrpToken = hive.getSetting<String>('abrp_token') ?? '';
+      abrpCarModel = hive.getSetting<String>('abrp_car_model') ?? 'xpeng:g6:23:87:other';
+      abrpInterval = hive.getSetting<int>('abrp_interval_seconds') ?? 60;
+      if (abrpToken.isNotEmpty) {
+        print('ABRP settings loaded from Hive');
       }
     }
 
-    final abrpEnabled = settings['abrp_enabled'] ?? false;
-    final abrpToken = settings['abrp_token'] ?? '';
-    final abrpCarModel = settings['abrp_car_model'] ?? 'xpeng:g6:23:87:other';
-    final abrpInterval = settings['abrp_interval_seconds'] ?? 60;
+    // Fall back to file storage if Hive didn't have settings
+    if (abrpToken.isEmpty) {
+      final settings = await _loadSettingsFromFile();
+      if (settings != null) {
+        abrpEnabled = settings['abrp_enabled'] ?? false;
+        abrpToken = settings['abrp_token'] ?? '';
+        abrpCarModel = settings['abrp_car_model'] ?? 'xpeng:g6:23:87:other';
+        abrpInterval = settings['abrp_interval_seconds'] ?? 60;
+        if (abrpToken.isNotEmpty) {
+          print('ABRP settings loaded from file');
+        }
+      }
+    }
+
+    // Fall back to SharedPreferences as last resort
+    if (abrpToken.isEmpty) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        abrpEnabled = prefs.getBool('abrp_enabled') ?? false;
+        abrpToken = prefs.getString('abrp_token') ?? '';
+        abrpCarModel = prefs.getString('abrp_car_model') ?? 'xpeng:g6:23:87:other';
+        abrpInterval = prefs.getInt('abrp_interval_seconds') ?? 60;
+        if (abrpToken.isNotEmpty) {
+          print('ABRP settings loaded from SharedPreferences');
+        }
+      } catch (e) {
+        print('SharedPreferences failed for ABRP: $e');
+      }
+    }
 
     if (abrpEnabled && abrpToken.isNotEmpty) {
       try {

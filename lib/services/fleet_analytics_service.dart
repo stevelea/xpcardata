@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vehicle_data.dart';
 import '../models/charging_session.dart';
 import 'debug_logger.dart';
+import 'hive_storage_service.dart';
 
 /// Service for sending anonymous fleet statistics to Firebase
 /// All data is anonymized and aggregated - no PII is collected
@@ -101,6 +102,16 @@ class FleetAnalyticsService {
 
   /// Save country code to storage
   Future<void> _saveCountryCode() async {
+    // Try Hive first (works on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable && _countryCode != null) {
+      await hive.saveSetting('fleet_analytics_country', _countryCode!);
+      await hive.saveSetting('fleet_analytics_country_timestamp',
+          _lastCountryLookup?.millisecondsSinceEpoch ?? 0);
+      return;
+    }
+
+    // Fallback to SharedPreferences
     try {
       final prefs = await SharedPreferences.getInstance();
       if (_countryCode != null) {
@@ -115,6 +126,18 @@ class FleetAnalyticsService {
 
   /// Load cached country code
   Future<void> _loadCountryCode() async {
+    // Try Hive first (works on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      _countryCode = hive.getSetting<String>('fleet_analytics_country');
+      final timestamp = hive.getSetting<int>('fleet_analytics_country_timestamp');
+      if (timestamp != null) {
+        _lastCountryLookup = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      }
+      if (_countryCode != null) return;
+    }
+
+    // Fallback to SharedPreferences
     try {
       final prefs = await SharedPreferences.getInstance();
       _countryCode = prefs.getString('fleet_analytics_country');
@@ -159,28 +182,42 @@ class FleetAnalyticsService {
   }
 
   /// Load settings from storage
-  /// Tries SharedPreferences first, then file fallback, then merges results
+  /// Tries Hive first, then SharedPreferences, then file fallback
   Future<void> _loadSettings() async {
+    bool hiveLoaded = false;
     bool prefsLoaded = false;
     bool fileLoaded = false;
+    bool hiveEnabled = false;
+    bool hiveConsent = false;
     bool prefsEnabled = false;
     bool prefsConsent = false;
     bool fileEnabled = false;
     bool fileConsent = false;
 
-    // Try SharedPreferences first
+    // Try Hive first (works on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      hiveEnabled = hive.getSetting<bool>('fleet_analytics_enabled') ?? false;
+      hiveConsent = hive.getSetting<bool>('fleet_analytics_consent') ?? false;
+      _anonymousDeviceId = hive.getSetting<String>('fleet_analytics_device_id');
+      _vehicleModel = hive.getSetting<String>('vehicle_model') ?? 'G6';
+      hiveLoaded = true;
+      _logger.log('[FleetAnalytics] Hive loaded: enabled=$hiveEnabled, consent=$hiveConsent, deviceId=${_anonymousDeviceId != null}');
+    }
+
+    // Also try SharedPreferences (fallback)
     try {
       final prefs = await SharedPreferences.getInstance();
       prefsEnabled = prefs.getBool('fleet_analytics_enabled') ?? false;
       prefsConsent = prefs.getBool('fleet_analytics_consent') ?? false;
-      _anonymousDeviceId = prefs.getString('fleet_analytics_device_id');
-      _vehicleModel = prefs.getString('vehicle_model') ?? 'G6';
+      if (_anonymousDeviceId == null) {
+        _anonymousDeviceId = prefs.getString('fleet_analytics_device_id');
+      }
+      if (_vehicleModel == 'G6') {
+        _vehicleModel = prefs.getString('vehicle_model') ?? 'G6';
+      }
       prefsLoaded = true;
       _logger.log('[FleetAnalytics] SharedPrefs loaded: enabled=$prefsEnabled, consent=$prefsConsent, deviceId=${_anonymousDeviceId != null}');
-
-      // Debug: log all fleet-related prefs keys
-      final allKeys = prefs.getKeys().where((k) => k.contains('fleet'));
-      _logger.log('[FleetAnalytics] All fleet keys: $allKeys');
     } catch (e) {
       _logger.log('[FleetAnalytics] SharedPreferences failed: $e');
     }
@@ -208,15 +245,15 @@ class FleetAnalyticsService {
       _logger.log('[FleetAnalytics] File fallback failed: $e');
     }
 
-    // Use whichever source has it enabled (OR logic - if either has it enabled, use that)
-    _isEnabled = prefsEnabled || fileEnabled;
-    _consentGiven = prefsConsent || fileConsent;
+    // Use whichever source has it enabled (OR logic - if any has it enabled, use that)
+    _isEnabled = hiveEnabled || prefsEnabled || fileEnabled;
+    _consentGiven = hiveConsent || prefsConsent || fileConsent;
 
     final deviceIdPreview = _anonymousDeviceId != null && _anonymousDeviceId!.length >= 8
         ? '${_anonymousDeviceId!.substring(0, 8)}...'
         : _anonymousDeviceId ?? 'null';
     _logger.log('[FleetAnalytics] Final settings: enabled=$_isEnabled, consent=$_consentGiven, deviceId=$deviceIdPreview');
-    _logger.log('[FleetAnalytics] Sources: prefs=$prefsLoaded, file=$fileLoaded');
+    _logger.log('[FleetAnalytics] Sources: hive=$hiveLoaded, prefs=$prefsLoaded, file=$fileLoaded');
 
     // Generate anonymous device ID if not exists
     if (_anonymousDeviceId == null) {
@@ -237,11 +274,22 @@ class FleetAnalyticsService {
     await _loadCountryCode();
   }
 
-  /// Save settings to storage (saves to BOTH SharedPreferences and file for redundancy)
+  /// Save settings to storage (saves to Hive, SharedPreferences, and file for redundancy)
   Future<void> _saveSettings() async {
     _logger.log('[FleetAnalytics] Saving settings: enabled=$_isEnabled, consent=$_consentGiven');
 
-    // Save to SharedPreferences
+    // Save to Hive first (works on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      await hive.saveSetting('fleet_analytics_enabled', _isEnabled);
+      await hive.saveSetting('fleet_analytics_consent', _consentGiven);
+      if (_anonymousDeviceId != null) {
+        await hive.saveSetting('fleet_analytics_device_id', _anonymousDeviceId!);
+      }
+      _logger.log('[FleetAnalytics] Settings saved to Hive');
+    }
+
+    // Also save to SharedPreferences as backup
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('fleet_analytics_enabled', _isEnabled);

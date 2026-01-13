@@ -883,14 +883,52 @@ class DataSourceManager {
 
   /// Restore 12V battery protection settings from storage
   Future<void> restoreAuxBatteryProtectionSettings() async {
+    final hive = HiveStorageService.instance;
+
+    // Try Hive first (works on AI boxes)
+    if (hive.isAvailable) {
+      _auxBatteryProtectionEnabled = hive.getSetting<bool>('aux_battery_protection_enabled') ?? true;
+      _auxBatteryProtectionThreshold = hive.getSetting<double>('aux_battery_protection_threshold') ?? 12.5;
+      _logger.log('[DataSourceManager] 12V protection from Hive: enabled=$_auxBatteryProtectionEnabled, threshold=${_auxBatteryProtectionThreshold}V');
+      return;
+    }
+
+    // Fallback to SharedPreferences
     try {
       final prefs = await SharedPreferences.getInstance();
       _auxBatteryProtectionEnabled = prefs.getBool('aux_battery_protection_enabled') ?? true;
       _auxBatteryProtectionThreshold = prefs.getDouble('aux_battery_protection_threshold') ?? 12.5;
-      _logger.log('[DataSourceManager] 12V protection: enabled=$_auxBatteryProtectionEnabled, threshold=${_auxBatteryProtectionThreshold}V');
+      _logger.log('[DataSourceManager] 12V protection from SharedPreferences: enabled=$_auxBatteryProtectionEnabled, threshold=${_auxBatteryProtectionThreshold}V');
     } catch (e) {
       _logger.log('[DataSourceManager] Failed to load 12V protection settings: $e');
     }
+  }
+
+  /// Update 12V battery protection settings and clear active state if needed
+  void updateAuxBatteryProtectionSettings({bool? enabled, double? threshold}) {
+    if (enabled != null) {
+      _auxBatteryProtectionEnabled = enabled;
+      // If protection is disabled, immediately clear active state and resume polling
+      if (!enabled && _auxBatteryProtectionActive) {
+        _auxBatteryProtectionActive = false;
+        _obdService.resumePolling();
+        _logger.log('[DataSourceManager] 12V protection DISABLED by user - OBD polling RESUMED');
+      }
+    }
+
+    if (threshold != null) {
+      final oldThreshold = _auxBatteryProtectionThreshold;
+      _auxBatteryProtectionThreshold = threshold;
+      // If threshold was lowered and protection was active, clear it
+      // (the new threshold may be below the current voltage)
+      if (threshold < oldThreshold && _auxBatteryProtectionActive) {
+        _auxBatteryProtectionActive = false;
+        _obdService.resumePolling();
+        _logger.log('[DataSourceManager] 12V protection threshold LOWERED to ${threshold}V - OBD polling RESUMED');
+      }
+    }
+
+    _logger.log('[DataSourceManager] 12V protection updated: enabled=$_auxBatteryProtectionEnabled, threshold=${_auxBatteryProtectionThreshold}V, active=$_auxBatteryProtectionActive');
   }
 
   /// Check 12V battery voltage and pause/resume OBD polling if needed

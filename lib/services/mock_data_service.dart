@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/charging_sample.dart';
 import '../models/charging_session.dart';
 import '../models/vehicle_data.dart';
 import 'debug_logger.dart';
@@ -459,6 +460,16 @@ class MockDataService {
       final baseOdometer = 15000.0;
       final odometer = baseOdometer - (i * 150) - Random().nextInt(50);
 
+      // Generate charging curve for this session
+      final chargingCurve = _generateMockChargingCurve(
+        startTime: startTime,
+        durationMins: data.durationMins,
+        startSoc: data.startSoc.toDouble(),
+        endSoc: data.endSoc.toDouble(),
+        chargingType: data.chargingType,
+        maxPowerKw: data.maxPowerKw,
+      );
+
       sessions.add(ChargingSession(
         id: 'mock_${startTime.millisecondsSinceEpoch}',
         startTime: startTime,
@@ -481,6 +492,7 @@ class MockDataService {
         locationName: data.locationName,
         chargingCost: _estimateCost(data.energyKwh, data.chargingType, data.locationName),
         notes: null,
+        chargingCurve: chargingCurve,
       ));
     }
 
@@ -490,6 +502,78 @@ class MockDataService {
     _cachedSessions = sessions;
     _logger.log('[MockData] Generated ${sessions.length} mock sessions');
     return sessions;
+  }
+
+  /// Generate a realistic mock charging curve based on session parameters
+  List<ChargingSample> _generateMockChargingCurve({
+    required DateTime startTime,
+    required int durationMins,
+    required double startSoc,
+    required double endSoc,
+    required String chargingType,
+    required double maxPowerKw,
+  }) {
+    final samples = <ChargingSample>[];
+    final random = Random();
+
+    // Sample every 30 seconds
+    const sampleIntervalSeconds = 30;
+    final totalSamples = (durationMins * 60 / sampleIntervalSeconds).ceil();
+    final socRange = endSoc - startSoc;
+
+    for (var i = 0; i <= totalSamples; i++) {
+      final timestamp = startTime.add(Duration(seconds: i * sampleIntervalSeconds));
+      final progress = i / totalSamples; // 0.0 to 1.0
+
+      // Calculate SOC at this point (linear progression)
+      final soc = startSoc + (socRange * progress);
+
+      // Calculate power based on charging type and SOC
+      double powerKw;
+      if (chargingType == 'dc') {
+        // DC charging curve: high power below 50%, tapers 50-80%, slow above 80%
+        if (soc < 50) {
+          // Full power with slight variation
+          powerKw = maxPowerKw * (0.9 + random.nextDouble() * 0.1);
+        } else if (soc < 80) {
+          // Linear taper from 100% to 50% power between 50-80% SOC
+          final taperProgress = (soc - 50) / 30; // 0 at 50%, 1 at 80%
+          final taperFactor = 1.0 - (taperProgress * 0.5); // 1.0 to 0.5
+          powerKw = maxPowerKw * taperFactor * (0.9 + random.nextDouble() * 0.1);
+        } else {
+          // Slow charging above 80%: 20-30% of max power
+          final slowFactor = 0.2 + (random.nextDouble() * 0.1);
+          powerKw = maxPowerKw * slowFactor;
+        }
+      } else {
+        // AC charging: constant power throughout with small variations
+        powerKw = maxPowerKw * (0.95 + random.nextDouble() * 0.05);
+      }
+
+      // Battery temperature: starts at ambient, rises during charging
+      final baseTemp = 20.0 + random.nextDouble() * 5; // Ambient 20-25°C
+      final tempRise = chargingType == 'dc'
+          ? (powerKw / maxPowerKw) * 15 // DC can heat battery more
+          : 5.0; // AC heats less
+      final temperature = baseTemp + (tempRise * progress);
+
+      // Voltage: around 400V nominal, slightly higher when charging
+      final voltage = 380 + (soc * 0.4) + (random.nextDouble() * 5);
+
+      // Current: calculated from power and voltage (negative = charging)
+      final current = -(powerKw * 1000 / voltage);
+
+      samples.add(ChargingSample(
+        timestamp: timestamp,
+        soc: double.parse(soc.toStringAsFixed(1)),
+        powerKw: double.parse(powerKw.toStringAsFixed(1)),
+        temperature: double.parse(temperature.toStringAsFixed(1)),
+        voltage: double.parse(voltage.toStringAsFixed(1)),
+        current: double.parse(current.toStringAsFixed(1)),
+      ));
+    }
+
+    return samples;
   }
 
   /// Estimate charging cost based on energy, type, and location

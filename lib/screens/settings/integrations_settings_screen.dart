@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/fleet_analytics_service.dart';
+import '../../services/hive_storage_service.dart';
 import '../fleet_stats_screen.dart';
 
 /// Integrations settings sub-screen
@@ -38,47 +39,87 @@ class _IntegrationsSettingsScreenState extends ConsumerState<IntegrationsSetting
   }
 
   Future<void> _loadSettings() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      setState(() {
-        _abrpTokenController.text = prefs.getString('abrp_token') ?? '';
-        _abrpCarModelController.text = prefs.getString('abrp_car_model') ?? '';
-        _abrpEnabled = prefs.getBool('abrp_enabled') ?? false;
-        _abrpIntervalSeconds = prefs.getInt('abrp_interval_seconds') ?? 60;
-        _vehicleModel = prefs.getString('vehicle_model') ?? '24LR';
-      });
+    final hive = HiveStorageService.instance;
 
-      // Load fleet analytics state
-      _fleetAnalyticsEnabled = FleetAnalyticsService.instance.isEnabled;
-    } catch (e) {
-      debugPrint('Failed to load settings: $e');
+    // Try Hive first (works on AI boxes)
+    if (hive.isAvailable) {
+      setState(() {
+        _abrpTokenController.text = hive.getSetting<String>('abrp_token') ?? '';
+        _abrpCarModelController.text = hive.getSetting<String>('abrp_car_model') ?? '';
+        _abrpEnabled = hive.getSetting<bool>('abrp_enabled') ?? false;
+        _abrpIntervalSeconds = hive.getSetting<int>('abrp_interval_seconds') ?? 60;
+        _vehicleModel = hive.getSetting<String>('vehicle_model') ?? '24LR';
+      });
+      debugPrint('[Integrations] Loaded settings from Hive');
+    } else {
+      // Fallback to SharedPreferences
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        setState(() {
+          _abrpTokenController.text = prefs.getString('abrp_token') ?? '';
+          _abrpCarModelController.text = prefs.getString('abrp_car_model') ?? '';
+          _abrpEnabled = prefs.getBool('abrp_enabled') ?? false;
+          _abrpIntervalSeconds = prefs.getInt('abrp_interval_seconds') ?? 60;
+          _vehicleModel = prefs.getString('vehicle_model') ?? '24LR';
+        });
+        debugPrint('[Integrations] Loaded settings from SharedPreferences');
+      } catch (e) {
+        debugPrint('[Integrations] Failed to load settings: $e');
+      }
     }
+
+    // Load fleet analytics state (has its own Hive-based storage)
+    _fleetAnalyticsEnabled = FleetAnalyticsService.instance.isEnabled;
   }
 
   Future<void> _autoSaveString(String key, String value) async {
+    // Save to Hive first (works on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      await hive.saveSetting(key, value);
+      debugPrint('[Integrations] Saved $key to Hive');
+    }
+
+    // Also try SharedPreferences as backup
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(key, value);
     } catch (e) {
-      debugPrint('Failed to save $key: $e');
+      debugPrint('[Integrations] SharedPreferences save failed for $key: $e');
     }
   }
 
   Future<void> _autoSaveInt(String key, int value) async {
+    // Save to Hive first (works on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      await hive.saveSetting(key, value);
+      debugPrint('[Integrations] Saved $key to Hive');
+    }
+
+    // Also try SharedPreferences as backup
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(key, value);
     } catch (e) {
-      debugPrint('Failed to save $key: $e');
+      debugPrint('[Integrations] SharedPreferences save failed for $key: $e');
     }
   }
 
   Future<void> _autoSaveBool(String key, bool value) async {
+    // Save to Hive first (works on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      await hive.saveSetting(key, value);
+      debugPrint('[Integrations] Saved $key to Hive');
+    }
+
+    // Also try SharedPreferences as backup
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(key, value);
     } catch (e) {
-      debugPrint('Failed to save $key: $e');
+      debugPrint('[Integrations] SharedPreferences save failed for $key: $e');
     }
   }
 

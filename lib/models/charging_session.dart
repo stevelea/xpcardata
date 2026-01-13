@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'charging_sample.dart';
+
 /// Model representing a charging session with start/end data and consumption tracking
 class ChargingSession {
   final String id;
@@ -30,6 +32,9 @@ class ChargingSession {
   final double? chargingCost; // Cost in user's currency
   final String? notes; // User notes
 
+  // Charging curve data (time-series samples during charging)
+  final List<ChargingSample>? chargingCurve;
+
   ChargingSession({
     required this.id,
     required this.startTime,
@@ -52,6 +57,7 @@ class ChargingSession {
     this.locationName,
     this.chargingCost,
     this.notes,
+    this.chargingCurve,
   });
 
   /// Calculate energy added during this session (Ah)
@@ -88,6 +94,7 @@ class ChargingSession {
     double? endOdometer,
     double? averageVoltage,
     double? previousOdometer,
+    List<ChargingSample>? chargingCurve,
   }) {
     final energyAh = endCumulativeCharge - startCumulativeCharge;
     final energyKwh = averageVoltage != null ? (energyAh * averageVoltage) / 1000.0 : null;
@@ -118,6 +125,7 @@ class ChargingSession {
       locationName: locationName,
       chargingCost: chargingCost,
       notes: notes,
+      chargingCurve: chargingCurve ?? this.chargingCurve,
     );
   }
 
@@ -129,6 +137,7 @@ class ChargingSession {
     double? energyAddedKwh,
     double? latitude,
     double? longitude,
+    List<ChargingSample>? chargingCurve,
   }) {
     return ChargingSession(
       id: id,
@@ -152,6 +161,7 @@ class ChargingSession {
       locationName: locationName ?? this.locationName,
       chargingCost: chargingCost ?? this.chargingCost,
       notes: notes ?? this.notes,
+      chargingCurve: chargingCurve ?? this.chargingCurve,
     );
   }
 
@@ -183,6 +193,8 @@ class ChargingSession {
       'locationName': locationName,
       'chargingCost': chargingCost,
       'notes': notes,
+      if (chargingCurve != null && chargingCurve!.isNotEmpty)
+        'chargingCurve': chargingCurve!.map((s) => s.toJson()).toList(),
     };
   }
 
@@ -215,6 +227,11 @@ class ChargingSession {
       locationName: json['locationName'] as String?,
       chargingCost: (json['chargingCost'] as num?)?.toDouble(),
       notes: json['notes'] as String?,
+      chargingCurve: json['chargingCurve'] != null
+          ? (json['chargingCurve'] as List)
+              .map((s) => ChargingSample.fromJson(s as Map<String, dynamic>))
+              .toList()
+          : null,
     );
   }
 
@@ -247,6 +264,8 @@ class ChargingSession {
       'locationName': locationName,
       'chargingCost': chargingCost,
       'notes': notes,
+      if (chargingCurve != null && chargingCurve!.isNotEmpty)
+        'chargingCurve': chargingCurve!.map((s) => s.toMap()).toList(),
     };
   }
 
@@ -276,6 +295,11 @@ class ChargingSession {
       locationName: map['locationName'] as String?,
       chargingCost: (map['chargingCost'] as num?)?.toDouble(),
       notes: map['notes'] as String?,
+      chargingCurve: map['chargingCurve'] != null
+          ? (map['chargingCurve'] as List)
+              .map((s) => ChargingSample.fromMap(s as Map<String, dynamic>))
+              .toList()
+          : null,
     );
   }
 
