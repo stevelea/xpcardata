@@ -12,6 +12,7 @@ import 'database_service.dart';
 import 'hive_storage_service.dart';
 import 'native_location_service.dart';
 import 'open_charge_map_service.dart';
+import 'mock_data_service.dart';
 
 /// Charging type enum
 enum ChargingType {
@@ -916,6 +917,17 @@ class ChargingSessionService {
       _logger.log('[Charging] File storage failed: $e');
     }
 
+    // Fall back to mock data if in mock mode
+    final mockService = MockDataService.instance;
+    if (mockService.isEnabled) {
+      final mockSessions = mockService.getMockSessions();
+      if (mockSessions.isNotEmpty) {
+        mockSessions.sort((a, b) => b.startTime.compareTo(a.startTime));
+        _logger.log('[Charging] Returning ${mockSessions.take(limit).length} mock sessions');
+        return mockSessions.take(limit).toList();
+      }
+    }
+
     return [];
   }
 
@@ -971,11 +983,24 @@ class ChargingSessionService {
     // Fall back to file storage
     try {
       final sessions = await _loadSessionsFromFile();
-      sessions.sort((a, b) => b.startTime.compareTo(a.startTime));
-      _logger.log('[Charging] Returning ${sessions.length} sessions from file storage');
-      return sessions;
+      if (sessions.isNotEmpty) {
+        sessions.sort((a, b) => b.startTime.compareTo(a.startTime));
+        _logger.log('[Charging] Returning ${sessions.length} sessions from file storage');
+        return sessions;
+      }
     } catch (e) {
       _logger.log('[Charging] File storage failed: $e');
+    }
+
+    // Fall back to mock data if in mock mode
+    final mockService = MockDataService.instance;
+    if (mockService.isEnabled) {
+      final mockSessions = mockService.getMockSessions();
+      if (mockSessions.isNotEmpty) {
+        mockSessions.sort((a, b) => b.startTime.compareTo(a.startTime));
+        _logger.log('[Charging] Returning ${mockSessions.length} mock sessions');
+        return mockSessions;
+      }
     }
 
     return [];
