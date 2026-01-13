@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "531886562892",
+    "project_id": "xpcardata-fleet",
+    "storage_bucket": "xpcardata-fleet.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:531886562892:android:00bfae9848fea3f6065ee9",
+        "android_client_info": {
+          "package_name": "com.example.carsoc"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBu8JIrw7jMtrRiIEPNXvqtNczbwfH9f2M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
