@@ -26,9 +26,8 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
   bool _backgroundServiceEnabled = false;
   bool _backgroundServiceAvailable = false;
 
-  // Location/GPS - managed via DataSourceManager, local state for UI only
-  bool _locationEnabled = false;
-  bool _locationStateInitialized = false;
+  // Location/GPS - tracks user interaction, initialized from DataSourceManager
+  bool? _locationEnabled; // null means use DataSourceManager value directly
 
   // Alert Thresholds
   double _lowBatteryThreshold = 20.0;
@@ -53,16 +52,16 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
     // This ensures ref is properly available
   }
 
-  /// Initialize location state from DataSourceManager - called from build() on first run
-  void _initializeLocationState() {
-    if (_locationStateInitialized) return;
-    _locationStateInitialized = true;
-
-    // Read directly from DataSourceManager - it knows the current state
+  /// Get effective location enabled state - use local state if set, otherwise DataSourceManager
+  bool _getLocationEnabled() {
+    if (_locationEnabled != null) {
+      return _locationEnabled!;
+    }
+    // First access - read from DataSourceManager
     final dataSourceManager = ref.read(dataSourceManagerProvider);
-    final managerState = dataSourceManager.isLocationEnabled;
-    debugPrint('[AppSettings] Initializing location from DataSourceManager: $managerState');
-    _locationEnabled = managerState;
+    final state = dataSourceManager.isLocationEnabled;
+    debugPrint('[AppSettings] Reading location from DataSourceManager: $state');
+    return state;
   }
 
   Future<void> _loadVersion() async {
@@ -470,9 +469,6 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
   Widget build(BuildContext context) {
     final dataSourceManager = ref.watch(dataSourceManagerProvider);
 
-    // Initialize location state on first build - this ensures ref is available
-    _initializeLocationState();
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('App Settings'),
@@ -646,7 +642,7 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
                   SwitchListTile(
                     title: const Text('Enable GPS Tracking'),
                     subtitle: const Text('Track vehicle location via phone GPS'),
-                    value: _locationEnabled,
+                    value: _getLocationEnabled(),
                     onChanged: (value) async {
                       final dataSourceManager = ref.read(dataSourceManagerProvider);
                       final scaffoldMessenger = ScaffoldMessenger.of(context);
@@ -664,7 +660,7 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
                     },
                     secondary: Icon(
                       Icons.location_on,
-                      color: _locationEnabled ? Colors.teal : Colors.grey,
+                      color: _getLocationEnabled() ? Colors.teal : Colors.grey,
                     ),
                   ),
                   const Divider(),
@@ -675,7 +671,7 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  if (_locationEnabled) ...[
+                  if (_getLocationEnabled()) ...[
                     const SizedBox(height: 16),
                     Builder(
                       builder: (context) {
@@ -739,7 +735,7 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
                           )
                         : null,
                   ),
-                  if (_locationEnabled) ...[
+                  if (_getLocationEnabled()) ...[
                     const SizedBox(height: 8),
                     ElevatedButton.icon(
                       onPressed: () async {
