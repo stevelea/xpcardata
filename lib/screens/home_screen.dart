@@ -26,11 +26,12 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObserver {
   bool _isVpnActive = false;
   bool _isInternetConnected = false;
   StreamSubscription<bool>? _vpnStatusSubscription;
   StreamSubscription<bool>? _connectivitySubscription;
+  StreamSubscription<ChargingSession>? _sessionSubscription;
   List<ChargingSession> _recentSessions = [];
   bool _isLoadingSessions = true;
 
@@ -83,6 +84,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     // Load recent charging sessions
     _loadRecentSessions();
+
+    // Listen for charging session updates to refresh the list
+    final manager = ref.read(dataSourceManagerProvider);
+    _sessionSubscription = manager.chargingSessionService.sessionStream.listen((session) {
+      // Refresh sessions when a session is updated (started, ended, etc.)
+      _loadRecentSessions();
+    });
+
+    // Register to listen for app lifecycle changes (refresh when app comes to foreground)
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Refresh sessions when app comes back to foreground
+    if (state == AppLifecycleState.resumed) {
+      _loadRecentSessions();
+    }
   }
 
   Future<void> _loadRecentSessions() async {
@@ -106,8 +125,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _vpnStatusSubscription?.cancel();
     _connectivitySubscription?.cancel();
+    _sessionSubscription?.cancel();
     TailscaleService.instance.stopStatusMonitoring();
     ConnectivityService.instance.stopMonitoring();
     super.dispose();
