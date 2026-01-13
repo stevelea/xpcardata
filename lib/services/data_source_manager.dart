@@ -16,6 +16,7 @@ import 'native_location_service.dart';
 import 'fleet_analytics_service.dart';
 import 'mock_data_service.dart';
 import 'debug_logger.dart';
+import 'hive_storage_service.dart';
 
 /// Data source types available
 enum DataSource {
@@ -717,18 +718,16 @@ class DataSourceManager {
     }
   }
 
-  /// Save location preference to both SharedPreferences and file
+  /// Save location preference using Hive (primary) with file fallback
   Future<void> _saveLocationPreference(bool enabled) async {
-    // Save to SharedPreferences
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('location_enabled', enabled);
-      _logger.log('[DataSourceManager] Location preference saved to SharedPreferences: $enabled');
-    } catch (e) {
-      _logger.log('[DataSourceManager] Failed to save location preference to SharedPreferences: $e');
+    // Save to Hive first (works on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      await hive.saveSetting('location_enabled', enabled);
+      _logger.log('[DataSourceManager] Location preference saved to Hive: $enabled');
     }
 
-    // Also save to file (more reliable on some Android devices)
+    // Also save to file as backup
     try {
       final file = File('/data/data/com.example.carsoc/files/location_setting.json');
       await file.writeAsString('{"enabled": $enabled}');
@@ -743,16 +742,16 @@ class DataSourceManager {
   Future<void> restoreLocationSetting() async {
     bool? enabled;
 
-    // Try SharedPreferences first
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      enabled = prefs.getBool('location_enabled');
-      _logger.log('[DataSourceManager] Location preference from SharedPreferences: $enabled');
-    } catch (e) {
-      _logger.log('[DataSourceManager] Failed to read location preference from SharedPreferences: $e');
+    // Try Hive first (most reliable on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      enabled = hive.getSetting<bool>('location_enabled');
+      if (enabled != null) {
+        _logger.log('[DataSourceManager] Location preference from Hive: $enabled');
+      }
     }
 
-    // Try file fallback if SharedPreferences didn't have a value
+    // Try file fallback if Hive didn't have a value
     if (enabled == null) {
       try {
         final file = File('/data/data/com.example.carsoc/files/location_setting.json');

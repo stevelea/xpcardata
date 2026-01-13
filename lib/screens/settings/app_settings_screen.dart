@@ -9,6 +9,7 @@ import '../../services/background_service.dart';
 import '../../services/theme_service.dart';
 import '../../theme/app_themes.dart';
 import '../../services/open_charge_map_service.dart';
+import '../../services/hive_storage_service.dart';
 
 /// App settings sub-screen
 /// Includes: App Behavior, Updates, Alert Thresholds
@@ -52,12 +53,23 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
     // This ensures ref is properly available
   }
 
-  /// Get effective location enabled state - use local state if set, otherwise DataSourceManager
+  /// Get effective location enabled state - use local state if set, otherwise read from Hive/DataSourceManager
   bool _getLocationEnabled() {
     if (_locationEnabled != null) {
       return _locationEnabled!;
     }
-    // First access - read from DataSourceManager
+
+    // First access - try Hive first (most reliable on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      final hiveState = hive.getSetting<bool>('location_enabled');
+      if (hiveState != null) {
+        debugPrint('[AppSettings] Reading location from Hive: $hiveState');
+        return hiveState;
+      }
+    }
+
+    // Fallback to DataSourceManager
     final dataSourceManager = ref.read(dataSourceManagerProvider);
     final state = dataSourceManager.isLocationEnabled;
     debugPrint('[AppSettings] Reading location from DataSourceManager: $state');
