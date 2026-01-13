@@ -63,7 +63,27 @@ class _AboutSettingsScreenState extends ConsumerState<AboutSettingsScreen> {
                 children: [
                   ListTile(
                     leading: const Icon(Icons.info),
-                    title: const Text('XPCarData'),
+                    title: Row(
+                      children: [
+                        const Text('XPCarData'),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.orange,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            'BETA',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                     subtitle: Text(
                       'by Steve Lea\n'
                       'Version $_version\n'
