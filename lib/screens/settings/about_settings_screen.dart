@@ -117,10 +117,10 @@ class _AboutSettingsScreenState extends ConsumerState<AboutSettingsScreen> {
                 ListTile(
                   leading: const Icon(Icons.email),
                   title: const Text('Email Support'),
-                  subtitle: const Text('stevelea@gmail.com'),
+                  subtitle: const Text('support@xpcardata.com'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () async {
-                    final uri = Uri.parse('mailto:stevelea@gmail.com?subject=XPCarData%20Support');
+                    final uri = Uri.parse('mailto:support@xpcardata.com?subject=XPCarData%20Support');
                     if (await canLaunchUrl(uri)) {
                       await launchUrl(uri);
                     }
