@@ -238,6 +238,7 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
                       prefixIcon: Icon(Icons.cloud),
                     ),
                     enabled: _mqttEnabled,
+                    onChanged: (value) => _autoSaveString('mqtt_broker', value),
                   ),
                   const SizedBox(height: 16),
                   TextField(
@@ -249,6 +250,7 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
                     ),
                     keyboardType: TextInputType.number,
                     enabled: _mqttEnabled,
+                    onChanged: (value) => _autoSaveInt('mqtt_port', int.tryParse(value) ?? 1883),
                   ),
                   const SizedBox(height: 16),
                   TextField(
@@ -259,6 +261,7 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
                       prefixIcon: Icon(Icons.directions_car),
                     ),
                     enabled: _mqttEnabled,
+                    onChanged: (value) => _autoSaveString('mqtt_vehicle_id', value),
                   ),
                   const SizedBox(height: 16),
                   TextField(
@@ -268,6 +271,7 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
                       prefixIcon: Icon(Icons.person),
                     ),
                     enabled: _mqttEnabled,
+                    onChanged: (value) => _autoSaveString('mqtt_username', value),
                   ),
                   const SizedBox(height: 16),
                   TextField(
@@ -278,6 +282,7 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
                     ),
                     obscureText: true,
                     enabled: _mqttEnabled,
+                    onChanged: (value) => _autoSaveString('mqtt_password', value),
                   ),
                   const SizedBox(height: 16),
                   SwitchListTile(
