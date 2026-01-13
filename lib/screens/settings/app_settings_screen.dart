@@ -57,18 +57,11 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
   Future<void> _loadLocationState() async {
     debugPrint('[AppSettings] Loading location state...');
 
-    // First try DataSourceManager (it's already initialized by the time settings opens)
-    final dataSourceManager = ref.read(dataSourceManagerProvider);
-    final managerState = dataSourceManager.isLocationEnabled;
-    debugPrint('[AppSettings] DataSourceManager.isLocationEnabled = $managerState');
+    // Always read from file first - it's the most reliable source
+    // The DataSourceManager.isLocationEnabled may not be set yet due to async timing
+    bool enabled = false;
 
-    if (managerState) {
-      debugPrint('[AppSettings] Setting _locationEnabled = true from DataSourceManager');
-      setState(() => _locationEnabled = true);
-      return;
-    }
-
-    // Also check file fallback in case DataSourceManager hasn't fully loaded
+    // Check file first (most reliable on AI boxes and phones with SharedPreferences issues)
     try {
       final file = File('/data/data/com.example.carsoc/files/location_setting.json');
       final exists = await file.exists();
@@ -78,15 +71,26 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
         final content = await file.readAsString();
         debugPrint('[AppSettings] File content: $content');
         final json = jsonDecode(content);
-        final enabled = json['enabled'] as bool? ?? false;
-        debugPrint('[AppSettings] Parsed enabled = $enabled');
-        if (mounted) {
-          debugPrint('[AppSettings] Setting _locationEnabled = $enabled from file');
-          setState(() => _locationEnabled = enabled);
-        }
+        enabled = json['enabled'] as bool? ?? false;
+        debugPrint('[AppSettings] Parsed enabled from file = $enabled');
       }
     } catch (e) {
       debugPrint('[AppSettings] Failed to load location state from file: $e');
+    }
+
+    // Also check DataSourceManager as backup
+    if (!enabled) {
+      final dataSourceManager = ref.read(dataSourceManagerProvider);
+      final managerState = dataSourceManager.isLocationEnabled;
+      debugPrint('[AppSettings] DataSourceManager.isLocationEnabled = $managerState');
+      if (managerState) {
+        enabled = true;
+      }
+    }
+
+    debugPrint('[AppSettings] Final _locationEnabled = $enabled');
+    if (mounted) {
+      setState(() => _locationEnabled = enabled);
     }
   }
 
