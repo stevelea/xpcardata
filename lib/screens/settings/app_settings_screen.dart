@@ -55,9 +55,15 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
 
   /// Load location state from file fallback (more reliable on AI boxes)
   Future<void> _loadLocationState() async {
+    debugPrint('[AppSettings] Loading location state...');
+
     // First try DataSourceManager (it's already initialized by the time settings opens)
     final dataSourceManager = ref.read(dataSourceManagerProvider);
-    if (dataSourceManager.isLocationEnabled) {
+    final managerState = dataSourceManager.isLocationEnabled;
+    debugPrint('[AppSettings] DataSourceManager.isLocationEnabled = $managerState');
+
+    if (managerState) {
+      debugPrint('[AppSettings] Setting _locationEnabled = true from DataSourceManager');
       setState(() => _locationEnabled = true);
       return;
     }
@@ -65,11 +71,17 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
     // Also check file fallback in case DataSourceManager hasn't fully loaded
     try {
       final file = File('/data/data/com.example.carsoc/files/location_setting.json');
-      if (await file.exists()) {
+      final exists = await file.exists();
+      debugPrint('[AppSettings] File exists: $exists');
+
+      if (exists) {
         final content = await file.readAsString();
+        debugPrint('[AppSettings] File content: $content');
         final json = jsonDecode(content);
         final enabled = json['enabled'] as bool? ?? false;
+        debugPrint('[AppSettings] Parsed enabled = $enabled');
         if (mounted) {
+          debugPrint('[AppSettings] Setting _locationEnabled = $enabled from file');
           setState(() => _locationEnabled = enabled);
         }
       }
