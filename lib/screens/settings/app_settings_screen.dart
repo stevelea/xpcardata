@@ -28,8 +28,9 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
   bool _backgroundServiceEnabled = false;
   bool _backgroundServiceAvailable = false;
 
-  // Location/GPS
+  // Location/GPS - initialized to true to match likely state, will be updated in initState
   bool _locationEnabled = false;
+  bool _locationStateLoaded = false;
 
   // Alert Thresholds
   double _lowBatteryThreshold = 20.0;
@@ -50,44 +51,60 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
     _loadSettings();
     _checkBackgroundServiceAvailability();
     _loadVersion();
-    _loadLocationState();
+    // Initialize location state SYNCHRONOUSLY from DataSourceManager first
+    // This is critical - the async method runs AFTER the first build,
+    // so we need to set the initial value before the first render
+    _initLocationStateSynchronously();
+    // Then run async to check file fallback if needed
+    _loadLocationStateAsync();
   }
 
-  /// Load location state - check DataSourceManager first (most reliable when returning to settings)
-  Future<void> _loadLocationState() async {
-    debugPrint('[AppSettings] Loading location state...');
+  /// Initialize location state synchronously from DataSourceManager
+  /// This runs BEFORE the first build, so the UI shows the correct initial state
+  void _initLocationStateSynchronously() {
+    try {
+      final dataSourceManager = ref.read(dataSourceManagerProvider);
+      final managerState = dataSourceManager.isLocationEnabled;
+      debugPrint('[AppSettings] SYNC init: DataSourceManager.isLocationEnabled = $managerState');
+      _locationEnabled = managerState;
+      _locationStateLoaded = managerState; // If true, we're done
+    } catch (e) {
+      debugPrint('[AppSettings] SYNC init failed: $e');
+    }
+  }
 
-    bool enabled = false;
+  /// Load location state asynchronously - fallback to file if DataSourceManager says false
+  Future<void> _loadLocationStateAsync() async {
+    debugPrint('[AppSettings] ASYNC loading location state...');
 
-    // Check DataSourceManager FIRST - it's already running and knows the real state
-    final dataSourceManager = ref.read(dataSourceManagerProvider);
-    final managerState = dataSourceManager.isLocationEnabled;
-    debugPrint('[AppSettings] DataSourceManager.isLocationEnabled = $managerState');
-
-    if (managerState) {
-      enabled = true;
-    } else {
-      // Fallback to file if DataSourceManager says false (might not be initialized yet on cold start)
-      try {
-        final file = File('/data/data/com.example.carsoc/files/location_setting.json');
-        final exists = await file.exists();
-        debugPrint('[AppSettings] File exists: $exists');
-
-        if (exists) {
-          final content = await file.readAsString();
-          debugPrint('[AppSettings] File content: $content');
-          final json = jsonDecode(content);
-          enabled = json['enabled'] as bool? ?? false;
-          debugPrint('[AppSettings] Parsed enabled from file = $enabled');
-        }
-      } catch (e) {
-        debugPrint('[AppSettings] Failed to load location state from file: $e');
-      }
+    // If already enabled from sync init, no need to check file
+    if (_locationEnabled) {
+      debugPrint('[AppSettings] Already enabled from sync init, skipping file check');
+      return;
     }
 
-    debugPrint('[AppSettings] Final _locationEnabled = $enabled');
-    if (mounted) {
-      setState(() => _locationEnabled = enabled);
+    // DataSourceManager says false - check file as fallback (might be cold start)
+    try {
+      final file = File('/data/data/com.example.carsoc/files/location_setting.json');
+      final exists = await file.exists();
+      debugPrint('[AppSettings] File exists: $exists');
+
+      if (exists) {
+        final content = await file.readAsString();
+        debugPrint('[AppSettings] File content: $content');
+        final json = jsonDecode(content);
+        final enabled = json['enabled'] as bool? ?? false;
+        debugPrint('[AppSettings] Parsed enabled from file = $enabled');
+
+        if (enabled && mounted) {
+          setState(() {
+            _locationEnabled = true;
+            _locationStateLoaded = true;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('[AppSettings] Failed to load location state from file: $e');
     }
   }
 
