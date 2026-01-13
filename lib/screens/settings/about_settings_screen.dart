@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../providers/vehicle_data_provider.dart';
 import '../../services/mock_data_service.dart';
 import '../../services/github_update_service.dart' show appVersion;
@@ -104,6 +105,41 @@ class _AboutSettingsScreenState extends ConsumerState<AboutSettingsScreen> {
                   ),
                 ],
               ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Support Section
+          _buildSectionHeader('Support'),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.email),
+                  title: const Text('Email Support'),
+                  subtitle: const Text('stevelea@gmail.com'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    final uri = Uri.parse('mailto:stevelea@gmail.com?subject=XPCarData%20Support');
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri);
+                    }
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.code),
+                  title: const Text('GitHub'),
+                  subtitle: const Text('Report issues & contribute'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    final uri = Uri.parse('https://github.com/stevelea/xpcardata');
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
+                  },
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 24),
