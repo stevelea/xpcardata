@@ -54,7 +54,7 @@ class DataSourceManager {
 
   // 12V battery protection
   bool _auxBatteryProtectionEnabled = true;
-  double _auxBatteryProtectionThreshold = 12.5;
+  double _auxBatteryProtectionThreshold = 12.8;
   bool _auxBatteryProtectionActive = false; // Currently paused due to low 12V
   static const double _auxBatteryHysteresis = 0.3; // Resume when voltage rises above threshold + hysteresis
 
@@ -888,7 +888,7 @@ class DataSourceManager {
     // Try Hive first (works on AI boxes)
     if (hive.isAvailable) {
       _auxBatteryProtectionEnabled = hive.getSetting<bool>('aux_battery_protection_enabled') ?? true;
-      _auxBatteryProtectionThreshold = hive.getSetting<double>('aux_battery_protection_threshold') ?? 12.5;
+      _auxBatteryProtectionThreshold = hive.getSetting<double>('aux_battery_protection_threshold') ?? 12.8;
       _logger.log('[DataSourceManager] 12V protection from Hive: enabled=$_auxBatteryProtectionEnabled, threshold=${_auxBatteryProtectionThreshold}V');
       return;
     }
@@ -897,7 +897,7 @@ class DataSourceManager {
     try {
       final prefs = await SharedPreferences.getInstance();
       _auxBatteryProtectionEnabled = prefs.getBool('aux_battery_protection_enabled') ?? true;
-      _auxBatteryProtectionThreshold = prefs.getDouble('aux_battery_protection_threshold') ?? 12.5;
+      _auxBatteryProtectionThreshold = prefs.getDouble('aux_battery_protection_threshold') ?? 12.8;
       _logger.log('[DataSourceManager] 12V protection from SharedPreferences: enabled=$_auxBatteryProtectionEnabled, threshold=${_auxBatteryProtectionThreshold}V');
     } catch (e) {
       _logger.log('[DataSourceManager] Failed to load 12V protection settings: $e');

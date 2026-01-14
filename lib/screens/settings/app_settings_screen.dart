@@ -34,7 +34,7 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
   double _lowBatteryThreshold = 20.0;
   double _criticalBatteryThreshold = 10.0;
   double _highTempThreshold = 45.0;
-  double _auxBatteryProtectionThreshold = 12.5;
+  double _auxBatteryProtectionThreshold = 12.8;
   bool _auxBatteryProtectionEnabled = true;
 
   // Updates
@@ -108,7 +108,7 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
         _criticalBatteryThreshold = hive.getSetting<double>('alert_critical_battery') ?? 10.0;
         _highTempThreshold = hive.getSetting<double>('alert_high_temp') ?? 45.0;
         _auxBatteryProtectionEnabled = hive.getSetting<bool>('aux_battery_protection_enabled') ?? true;
-        _auxBatteryProtectionThreshold = hive.getSetting<double>('aux_battery_protection_threshold') ?? 12.5;
+        _auxBatteryProtectionThreshold = hive.getSetting<double>('aux_battery_protection_threshold') ?? 12.8;
       });
       debugPrint('[AppSettings] Loaded settings from Hive');
       return;
@@ -125,7 +125,7 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
         _criticalBatteryThreshold = prefs.getDouble('alert_critical_battery') ?? 10.0;
         _highTempThreshold = prefs.getDouble('alert_high_temp') ?? 45.0;
         _auxBatteryProtectionEnabled = prefs.getBool('aux_battery_protection_enabled') ?? true;
-        _auxBatteryProtectionThreshold = prefs.getDouble('aux_battery_protection_threshold') ?? 12.5;
+        _auxBatteryProtectionThreshold = prefs.getDouble('aux_battery_protection_threshold') ?? 12.8;
       });
       debugPrint('[AppSettings] Loaded settings from SharedPreferences');
     } catch (e) {
@@ -922,9 +922,9 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
                     ),
                     Slider(
                       value: _auxBatteryProtectionThreshold,
-                      min: 11.0,
-                      max: 13.0,
-                      divisions: 20, // 0.1V increments
+                      min: 12.0,
+                      max: 15.0,
+                      divisions: 30, // 0.1V increments
                       label: '${_auxBatteryProtectionThreshold.toStringAsFixed(1)}V',
                       onChanged: (value) {
                         setState(() => _auxBatteryProtectionThreshold = value);
