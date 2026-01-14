@@ -267,8 +267,8 @@ class LocalVehicleProfiles {
         type: OBDPIDType.custom,
         header: '7E0',
         priority: PIDPriority.high, // High priority for 12V battery protection monitoring
-        formula: '[B4:B5]/100',
-        parser: (r) => OBDPIDConfig.parseWithFormula(r, '[B4:B5]/100'),
+        formula: 'B4/10',
+        parser: (r) => OBDPIDConfig.parseWithFormula(r, 'B4/10'),
       ),
       OBDPIDConfig(
         name: 'RANGE_EST',
