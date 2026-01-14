@@ -1,0 +1,610 @@
+# XPCarData Home Assistant Dashboard Cards
+# ==========================================
+#
+# These dashboard cards display real-time vehicle data from MQTT.
+#
+# Prerequisites:
+# 1. XPCarData app connected via MQTT
+# 2. MQTT integration configured in Home Assistant
+# 3. Home Assistant auto-discovery enabled (default)
+#
+# Setup:
+# 1. Go to Settings > Dashboards > Add Dashboard (or edit existing)
+# 2. Click "Edit Dashboard" (pencil icon)
+# 3. Click "+" to add a card
+# 4. Choose "Manual" at the bottom
+# 5. Paste the YAML for the card you want
+#
+# Sensor Entity Naming Convention:
+# The app publishes to: vehicles/{vehicle_id}/data
+# Home Assistant creates sensors like: sensor.xpeng_g6_{property}
+#
+# If your vehicle_id is different, update the entity names below.
+# Example: If vehicle_id is "my_car", entities would be sensor.my_car_soc
+#
+# ==========================================
+
+# --------------------------------------
+# MAIN BATTERY GAUGE (SOC)
+# Large circular gauge showing State of Charge
+# --------------------------------------
+
+# Option 1: Using gauge card (built-in)
+type: gauge
+entity: sensor.xpeng_g6_soc
+name: Battery
+unit: "%"
+min: 0
+max: 100
+severity:
+  green: 50
+  yellow: 20
+  red: 10
+needle: true
+
+---
+
+# Option 2: Custom battery card with icon and percentage
+# (Requires no additional custom cards)
+type: entity
+entity: sensor.xpeng_g6_soc
+name: Battery Level
+icon: mdi:battery
+attribute: state
+unit: "%"
+
+---
+
+# --------------------------------------
+# BATTERY STATUS CARD
+# Shows SOC, range, and charging status
+# Similar to the car's main display
+# --------------------------------------
+
+type: entities
+title: Battery Status
+show_header_toggle: false
+entities:
+  - entity: sensor.xpeng_g6_soc
+    name: State of Charge
+    icon: mdi:battery
+    secondary_info: last-updated
+  - entity: sensor.xpeng_g6_range
+    name: Estimated Range
+    icon: mdi:map-marker-distance
+  - entity: sensor.xpeng_g6_battery_temperature
+    name: Battery Temperature
+    icon: mdi:thermometer
+  - entity: sensor.xpeng_g6_soh
+    name: State of Health
+    icon: mdi:battery-heart-variant
+
+---
+
+# --------------------------------------
+# CHARGING INFO CARD
+# Shows current charging power and status
+# --------------------------------------
+
+type: entities
+title: Charging
+show_header_toggle: false
+entities:
+  - entity: sensor.xpeng_g6_charging_notification
+    name: Charging Status
+    icon: mdi:ev-station
+  - entity: sensor.xpeng_g6_power
+    name: Power
+    icon: mdi:lightning-bolt
+  - entity: sensor.xpeng_g6_battery_current
+    name: Current
+    icon: mdi:current-ac
+  - entity: sensor.xpeng_g6_battery_voltage
+    name: Voltage
+    icon: mdi:flash
+
+---
+
+# --------------------------------------
+# VEHICLE INFO CARD
+# Odometer, speed, location
+# --------------------------------------
+
+type: entities
+title: Vehicle Info
+show_header_toggle: false
+entities:
+  - entity: sensor.xpeng_g6_odometer
+    name: Odometer
+    icon: mdi:counter
+  - entity: sensor.xpeng_g6_speed
+    name: Speed
+    icon: mdi:speedometer
+  - entity: sensor.xpeng_g6_12v_battery
+    name: 12V Battery
+    icon: mdi:car-battery
+
+---
+
+# --------------------------------------
+# HORIZONTAL STACK - QUICK GLANCE
+# 3 mini gauges side by side
+# --------------------------------------
+
+type: horizontal-stack
+cards:
+  - type: gauge
+    entity: sensor.xpeng_g6_soc
+    name: SOC
+    min: 0
+    max: 100
+    severity:
+      green: 50
+      yellow: 20
+      red: 10
+  - type: gauge
+    entity: sensor.xpeng_g6_battery_temperature
+    name: Temp
+    min: -10
+    max: 60
+    severity:
+      green: 35
+      yellow: 40
+      red: 45
+  - type: gauge
+    entity: sensor.xpeng_g6_soh
+    name: SOH
+    min: 0
+    max: 100
+    severity:
+      green: 90
+      yellow: 80
+      red: 70
+
+---
+
+# --------------------------------------
+# MARKDOWN CARD - DASHBOARD STYLE
+# Custom formatted display like the car
+# --------------------------------------
+
+type: markdown
+title: XPENG G6
+content: |
+  # {{ states('sensor.xpeng_g6_soc') | round(0) }}%
+
+  **Range:** {{ states('sensor.xpeng_g6_range') | round(0) }} km
+
+  ---
+
+  | Metric | Value |
+  |--------|-------|
+  | Power | {{ states('sensor.xpeng_g6_power') | round(1) }} kW |
+  | Voltage | {{ states('sensor.xpeng_g6_battery_voltage') | round(0) }} V |
+  | Current | {{ states('sensor.xpeng_g6_battery_current') | round(1) }} A |
+  | Temperature | {{ states('sensor.xpeng_g6_battery_temperature') | round(1) }}°C |
+
+  ---
+
+  **Odometer:** {{ states('sensor.xpeng_g6_odometer') | round(0) }} km
+
+  *Last update: {{ as_timestamp(states.sensor.xpeng_g6_soc.last_updated) | timestamp_custom('%H:%M:%S') }}*
+
+---
+
+# --------------------------------------
+# PICTURE-ELEMENTS CARD
+# Visual car display with overlaid data
+# (Requires a car image - see instructions)
+# --------------------------------------
+
+# To use this card:
+# 1. Download an XPENG G6 image (top-down or side view)
+# 2. Place in /config/www/images/xpeng_g6.png
+# 3. Uncomment and customize the positions
+
+# type: picture-elements
+# image: /local/images/xpeng_g6.png
+# elements:
+#   - type: state-label
+#     entity: sensor.xpeng_g6_soc
+#     style:
+#       top: 50%
+#       left: 50%
+#       font-size: 2em
+#       font-weight: bold
+#       color: white
+#       text-shadow: 2px 2px 4px black
+#     suffix: "%"
+#   - type: state-label
+#     entity: sensor.xpeng_g6_range
+#     style:
+#       top: 60%
+#       left: 50%
+#       font-size: 1.2em
+#       color: white
+#       text-shadow: 1px 1px 2px black
+#     prefix: "Range: "
+#     suffix: " km"
+
+---
+
+# --------------------------------------
+# GLANCE CARD - COMPACT OVERVIEW
+# Shows multiple sensors in a grid
+# --------------------------------------
+
+type: glance
+title: XPENG G6 Quick View
+columns: 4
+show_name: true
+show_icon: true
+show_state: true
+entities:
+  - entity: sensor.xpeng_g6_soc
+    name: SOC
+    icon: mdi:battery
+  - entity: sensor.xpeng_g6_range
+    name: Range
+    icon: mdi:map-marker-distance
+  - entity: sensor.xpeng_g6_power
+    name: Power
+    icon: mdi:lightning-bolt
+  - entity: sensor.xpeng_g6_battery_temperature
+    name: Temp
+    icon: mdi:thermometer
+  - entity: sensor.xpeng_g6_battery_voltage
+    name: Voltage
+    icon: mdi:flash
+  - entity: sensor.xpeng_g6_battery_current
+    name: Current
+    icon: mdi:current-ac
+  - entity: sensor.xpeng_g6_odometer
+    name: ODO
+    icon: mdi:counter
+  - entity: sensor.xpeng_g6_speed
+    name: Speed
+    icon: mdi:speedometer
+
+---
+
+# --------------------------------------
+# STATISTICS GRAPH - SOC OVER TIME
+# Shows battery level history
+# --------------------------------------
+
+type: statistics-graph
+title: Battery Level (24h)
+entities:
+  - sensor.xpeng_g6_soc
+stat_types:
+  - mean
+  - min
+  - max
+period: hour
+days_to_show: 1
+
+---
+
+# --------------------------------------
+# HISTORY GRAPH - MULTIPLE METRICS
+# Shows trends over time
+# --------------------------------------
+
+type: history-graph
+title: Charging History
+hours_to_show: 24
+entities:
+  - entity: sensor.xpeng_g6_soc
+    name: SOC
+  - entity: sensor.xpeng_g6_power
+    name: Power
+  - entity: sensor.xpeng_g6_battery_temperature
+    name: Temperature
+
+---
+
+# --------------------------------------
+# CONDITIONAL CARD - CHARGING STATUS
+# Only shows when charging
+# --------------------------------------
+
+type: conditional
+conditions:
+  - condition: numeric_state
+    entity: sensor.xpeng_g6_battery_current
+    below: -1
+card:
+  type: entities
+  title: Currently Charging
+  entities:
+    - entity: sensor.xpeng_g6_power
+      name: Charging Power
+      icon: mdi:ev-station
+    - entity: sensor.xpeng_g6_soc
+      name: Current SOC
+    - type: custom:template-entity-row
+      name: Est. Time to 80%
+      state: >
+        {% set soc = states('sensor.xpeng_g6_soc') | float %}
+        {% set power = states('sensor.xpeng_g6_power') | float | abs %}
+        {% if power > 0 and soc < 80 %}
+          {% set remaining_kwh = (80 - soc) / 100 * 87.5 %}
+          {% set hours = remaining_kwh / power %}
+          {{ (hours * 60) | round(0) }} min
+        {% else %}
+          --
+        {% endif %}
+
+---
+
+# --------------------------------------
+# MUSHROOM CARDS (if installed)
+# Modern looking cards - requires HACS
+# https://github.com/piitaya/lovelace-mushroom
+# --------------------------------------
+
+# Mushroom Battery Chip
+# type: custom:mushroom-chips-card
+# chips:
+#   - type: template
+#     icon: mdi:battery
+#     icon_color: >
+#       {% set soc = states('sensor.xpeng_g6_soc') | float %}
+#       {% if soc > 50 %}green
+#       {% elif soc > 20 %}orange
+#       {% else %}red{% endif %}
+#     content: "{{ states('sensor.xpeng_g6_soc') | round(0) }}%"
+#     tap_action:
+#       action: more-info
+#       entity: sensor.xpeng_g6_soc
+
+# Mushroom Entity Card with progress bar
+# type: custom:mushroom-entity-card
+# entity: sensor.xpeng_g6_soc
+# name: Battery Level
+# icon: mdi:battery
+# fill_container: true
+# layout: horizontal
+# primary_info: state
+# secondary_info: name
+
+---
+
+# --------------------------------------
+# APEX CHARTS (if installed)
+# Beautiful charts - requires HACS
+# https://github.com/RomRider/apexcharts-card
+# --------------------------------------
+
+# type: custom:apexcharts-card
+# header:
+#   show: true
+#   title: Charging Curve
+#   show_states: true
+# graph_span: 12h
+# series:
+#   - entity: sensor.xpeng_g6_soc
+#     name: SOC
+#     type: area
+#     stroke_width: 2
+#     color: green
+#   - entity: sensor.xpeng_g6_power
+#     name: Power
+#     type: line
+#     stroke_width: 2
+#     color: orange
+#     y_axis_id: power
+# yaxis:
+#   - id: soc
+#     min: 0
+#     max: 100
+#     apex_config:
+#       title:
+#         text: "SOC %"
+#   - id: power
+#     opposite: true
+#     min: -150
+#     max: 150
+#     apex_config:
+#       title:
+#         text: "Power kW"
+
+---
+
+# --------------------------------------
+# MINI GRAPH CARD (if installed)
+# Compact graphs - requires HACS
+# https://github.com/kalkih/mini-graph-card
+# --------------------------------------
+
+# type: custom:mini-graph-card
+# name: Battery SOC
+# icon: mdi:battery
+# entities:
+#   - entity: sensor.xpeng_g6_soc
+#     name: SOC
+# hours_to_show: 24
+# points_per_hour: 4
+# line_width: 2
+# animate: true
+# show:
+#   labels: true
+#   points: true
+#   legend: false
+#   average: true
+#   extrema: true
+# color_thresholds:
+#   - value: 20
+#     color: "#ff0000"
+#   - value: 50
+#     color: "#ffaa00"
+#   - value: 80
+#     color: "#00ff00"
+
+---
+
+# --------------------------------------
+# VEHICLE MAP CARD
+# Shows vehicle location on a map
+# (Requires device_tracker or zone setup)
+# --------------------------------------
+
+type: map
+title: Vehicle Location
+default_zoom: 15
+entities:
+  - entity: device_tracker.xpeng_g6
+# If you don't have a device_tracker, use coordinates from MQTT:
+# You'll need to create a template sensor for this
+# See template_sensors.yaml in the docs
+
+---
+
+# --------------------------------------
+# FULL DASHBOARD VIEW
+# Complete dashboard layout
+# Copy this entire block to create a view
+# --------------------------------------
+
+# title: XPENG G6
+# path: xpeng
+# icon: mdi:car-electric
+# badges: []
+# cards:
+#   - type: vertical-stack
+#     cards:
+#       - type: horizontal-stack
+#         cards:
+#           - type: gauge
+#             entity: sensor.xpeng_g6_soc
+#             name: Battery
+#             min: 0
+#             max: 100
+#             severity:
+#               green: 50
+#               yellow: 20
+#               red: 10
+#             needle: true
+#           - type: markdown
+#             content: |
+#               ## {{ states('sensor.xpeng_g6_range') | round(0) }} km
+#               Estimated Range
+#       - type: glance
+#         columns: 4
+#         entities:
+#           - entity: sensor.xpeng_g6_power
+#             name: Power
+#           - entity: sensor.xpeng_g6_battery_voltage
+#             name: Voltage
+#           - entity: sensor.xpeng_g6_battery_current
+#             name: Current
+#           - entity: sensor.xpeng_g6_battery_temperature
+#             name: Temp
+#       - type: conditional
+#         conditions:
+#           - condition: numeric_state
+#             entity: sensor.xpeng_g6_battery_current
+#             below: -1
+#         card:
+#           type: entities
+#           title: Charging Active
+#           entities:
+#             - entity: sensor.xpeng_g6_power
+#               name: Charging Power
+#             - entity: sensor.xpeng_g6_soc
+#               name: Current SOC
+#       - type: history-graph
+#         title: Battery History
+#         hours_to_show: 24
+#         entities:
+#           - entity: sensor.xpeng_g6_soc
+#             name: SOC
+#       - type: entities
+#         title: Vehicle Info
+#         entities:
+#           - entity: sensor.xpeng_g6_odometer
+#             name: Odometer
+#           - entity: sensor.xpeng_g6_soh
+#             name: Battery Health
+#           - entity: sensor.xpeng_g6_12v_battery
+#             name: 12V Battery
+
+---
+
+# ==========================================
+# TEMPLATE SENSORS (optional)
+# Add these to configuration.yaml for
+# additional calculated values
+# ==========================================
+
+# template:
+#   - sensor:
+#       - name: "XPENG G6 Charging Status"
+#         unique_id: xpeng_g6_charging_status
+#         state: >
+#           {% set current = states('sensor.xpeng_g6_battery_current') | float(0) %}
+#           {% if current < -10 %}
+#             DC Fast Charging
+#           {% elif current < -1 %}
+#             AC Charging
+#           {% elif current > 1 %}
+#             Driving
+#           {% else %}
+#             Idle
+#           {% endif %}
+#         icon: >
+#           {% set current = states('sensor.xpeng_g6_battery_current') | float(0) %}
+#           {% if current < -1 %}
+#             mdi:ev-station
+#           {% elif current > 1 %}
+#             mdi:car
+#           {% else %}
+#             mdi:car-electric
+#           {% endif %}
+#
+#       - name: "XPENG G6 Time to 80%"
+#         unique_id: xpeng_g6_time_to_80
+#         unit_of_measurement: "min"
+#         state: >
+#           {% set soc = states('sensor.xpeng_g6_soc') | float(0) %}
+#           {% set power = states('sensor.xpeng_g6_power') | float(0) | abs %}
+#           {% if power > 0.5 and soc < 80 %}
+#             {% set remaining_kwh = (80 - soc) / 100 * 87.5 %}
+#             {{ (remaining_kwh / power * 60) | round(0) }}
+#           {% else %}
+#             unknown
+#           {% endif %}
+#         icon: mdi:clock-outline
+#
+#       - name: "XPENG G6 Battery Icon"
+#         unique_id: xpeng_g6_battery_icon
+#         state: "{{ states('sensor.xpeng_g6_soc') | round(0) }}"
+#         unit_of_measurement: "%"
+#         icon: >
+#           {% set soc = states('sensor.xpeng_g6_soc') | float(0) %}
+#           {% set charging = states('sensor.xpeng_g6_battery_current') | float(0) < -1 %}
+#           {% if charging %}
+#             {% if soc >= 90 %}mdi:battery-charging-90
+#             {% elif soc >= 80 %}mdi:battery-charging-80
+#             {% elif soc >= 70 %}mdi:battery-charging-70
+#             {% elif soc >= 60 %}mdi:battery-charging-60
+#             {% elif soc >= 50 %}mdi:battery-charging-50
+#             {% elif soc >= 40 %}mdi:battery-charging-40
+#             {% elif soc >= 30 %}mdi:battery-charging-30
+#             {% elif soc >= 20 %}mdi:battery-charging-20
+#             {% elif soc >= 10 %}mdi:battery-charging-10
+#             {% else %}mdi:battery-charging-outline{% endif %}
+#           {% else %}
+#             {% if soc >= 95 %}mdi:battery
+#             {% elif soc >= 85 %}mdi:battery-90
+#             {% elif soc >= 75 %}mdi:battery-80
+#             {% elif soc >= 65 %}mdi:battery-70
+#             {% elif soc >= 55 %}mdi:battery-60
+#             {% elif soc >= 45 %}mdi:battery-50
+#             {% elif soc >= 35 %}mdi:battery-40
+#             {% elif soc >= 25 %}mdi:battery-30
+#             {% elif soc >= 15 %}mdi:battery-20
+#             {% elif soc >= 5 %}mdi:battery-10
+#             {% else %}mdi:battery-outline{% endif %}
+#           {% endif %}
