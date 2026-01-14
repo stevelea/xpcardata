@@ -7,6 +7,7 @@ import '../../services/obd_proxy_service.dart';
 import '../../services/obd_service.dart';
 import '../../services/hive_storage_service.dart';
 import '../obd_connection_screen.dart';
+import '../obd_pid_config_screen.dart';
 
 /// Connections settings sub-screen
 /// Includes: MQTT, Tailscale, OBD Proxy, Data Sources
@@ -489,6 +490,17 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => OBDConnectionScreen(obdService: OBDService())),
+                    ),
+                  ),
+                  const Divider(),
+                  ListTile(
+                    leading: const Icon(Icons.settings_input_component, color: Colors.green),
+                    title: const Text('Vehicle Profiles'),
+                    subtitle: const Text('Load PID configuration for your vehicle'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const OBDPIDConfigScreen()),
                     ),
                   ),
                 ],
