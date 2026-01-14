@@ -1,0 +1,346 @@
+# XPCarData Home Assistant Automations
+# =====================================
+#
+# These automations respond to MQTT messages from the XPCarData app.
+#
+# Setup:
+# 1. Copy the automations you want to your automations.yaml
+# 2. Replace 'notify.notify' with your notification service:
+#    - notify.mobile_app_your_phone_name (Home Assistant Companion App)
+#    - notify.telegram
+#    - notify.pushover
+#    - notify.pushbullet
+# 3. Reload automations in Home Assistant
+#
+# MQTT Topics used:
+# - vehicles/{vehicle_id}/system_alert    - 12V battery alerts
+# - vehicles/{vehicle_id}/charging_notification - Charge start/stop events
+# - vehicles/{vehicle_id}/data            - Real-time vehicle data
+# - vehicles/{vehicle_id}/charging        - Charging session details
+#
+# =====================================
+
+# --------------------------------------
+# 12V BATTERY ALERTS
+# --------------------------------------
+
+# 1. 12V Battery Low Alert
+# Triggered when 12V battery drops below protection threshold
+- id: xpcardata_12v_battery_low_alert
+  alias: "XPCarData: 12V Battery Low Alert"
+  description: "Notify when 12V battery drops below threshold and OBD polling is paused"
+  trigger:
+    - platform: mqtt
+      topic: "vehicles/+/system_alert"
+  condition:
+    - condition: template
+      value_template: "{{ trigger.payload_json.alert_type == '12v_low' and trigger.payload_json.status == 'ALERT' }}"
+  action:
+    - service: notify.notify  # <-- Change to your notify service
+      data:
+        title: "⚠️ XPCarData: 12V Battery Low"
+        message: >
+          {{ trigger.payload_json.message }}
+          Voltage: {{ trigger.payload_json.voltage | round(1) }}V
+          Threshold: {{ trigger.payload_json.threshold | round(1) }}V
+        data:
+          tag: "xpcardata_12v_alert"
+          priority: high
+          channel: vehicle_alerts
+          # For Android - sticky notification
+          sticky: true
+          # For iOS - critical alert (use sparingly)
+          # push:
+          #   sound:
+          #     name: default
+          #     critical: 1
+          #     volume: 1.0
+
+# 2. 12V Battery Recovered
+# Triggered when 12V battery recovers and OBD polling resumes
+- id: xpcardata_12v_battery_recovered
+  alias: "XPCarData: 12V Battery Recovered"
+  description: "Notify when 12V battery voltage recovers"
+  trigger:
+    - platform: mqtt
+      topic: "vehicles/+/system_alert"
+  condition:
+    - condition: template
+      value_template: "{{ trigger.payload_json.alert_type == '12v_low' and trigger.payload_json.status == 'CLEAR' }}"
+  action:
+    - service: notify.notify  # <-- Change to your notify service
+      data:
+        title: "✅ XPCarData: 12V Battery OK"
+        message: "{{ trigger.payload_json.message }}"
+        data:
+          tag: "xpcardata_12v_alert"  # Replaces the previous alert notification
+
+# --------------------------------------
+# CHARGING NOTIFICATIONS
+# --------------------------------------
+
+# 3. Charging Started
+# Triggered when the vehicle starts charging (AC or DC)
+- id: xpcardata_charging_started
+  alias: "XPCarData: Charging Started"
+  description: "Notify when vehicle starts charging"
+  trigger:
+    - platform: mqtt
+      topic: "vehicles/+/charging_notification"
+  condition:
+    - condition: template
+      value_template: "{{ trigger.payload_json.event == 'CHARGE_STARTED' }}"
+  action:
+    - service: notify.notify  # <-- Change to your notify service
+      data:
+        title: "🔌 Charging Started"
+        message: >
+          {{ trigger.payload_json.charging_type | upper }} charging started at {{ trigger.payload_json.soc | round(1) }}% SOC
+          {%- if trigger.payload_json.power_kw is defined and trigger.payload_json.power_kw > 0 %}
+          Power: {{ trigger.payload_json.power_kw | round(1) }} kW
+          {%- endif %}
+        data:
+          tag: "xpcardata_charging"
+          priority: default
+
+# 4. Charging Stopped
+# Triggered when the vehicle stops charging
+- id: xpcardata_charging_stopped
+  alias: "XPCarData: Charging Stopped"
+  description: "Notify when vehicle stops charging"
+  trigger:
+    - platform: mqtt
+      topic: "vehicles/+/charging_notification"
+  condition:
+    - condition: template
+      value_template: "{{ trigger.payload_json.event == 'CHARGE_STOPPED' }}"
+  action:
+    - service: notify.notify  # <-- Change to your notify service
+      data:
+        title: "🔋 Charging Complete"
+        message: >
+          Charging stopped at {{ trigger.payload_json.soc | round(1) }}% SOC
+          {%- if trigger.payload_json.location is defined %}
+          Location: {{ trigger.payload_json.location }}
+          {%- endif %}
+        data:
+          tag: "xpcardata_charging"
+          priority: default
+
+# --------------------------------------
+# SOC-BASED ALERTS
+# --------------------------------------
+
+# 5. Low SOC Warning
+# Triggered when battery drops below 20%
+- id: xpcardata_low_soc_warning
+  alias: "XPCarData: Low SOC Warning"
+  description: "Notify when SOC drops below 20%"
+  trigger:
+    - platform: mqtt
+      topic: "vehicles/+/data"
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json.stateOfCharge is defined
+           and trigger.payload_json.stateOfCharge < 20
+           and trigger.payload_json.stateOfCharge > 0 }}
+  action:
+    - service: notify.notify  # <-- Change to your notify service
+      data:
+        title: "🪫 Low Battery Warning"
+        message: >
+          Battery at {{ trigger.payload_json.stateOfCharge | round(1) }}%
+          {%- if trigger.payload_json.range is defined %}
+          Range: {{ trigger.payload_json.range | round(0) }} km
+          {%- endif %}
+        data:
+          tag: "xpcardata_low_soc"
+          priority: high
+  mode: single
+
+# 6. Very Low SOC Critical Alert
+# Triggered when battery drops below 10%
+- id: xpcardata_critical_soc_warning
+  alias: "XPCarData: Critical SOC Warning"
+  description: "Urgent notification when SOC drops below 10%"
+  trigger:
+    - platform: mqtt
+      topic: "vehicles/+/data"
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json.stateOfCharge is defined
+           and trigger.payload_json.stateOfCharge < 10
+           and trigger.payload_json.stateOfCharge > 0 }}
+  action:
+    - service: notify.notify  # <-- Change to your notify service
+      data:
+        title: "🚨 CRITICAL: Battery Very Low!"
+        message: >
+          Battery at {{ trigger.payload_json.stateOfCharge | round(1) }}%!
+          {%- if trigger.payload_json.range is defined %}
+          Only {{ trigger.payload_json.range | round(0) }} km remaining!
+          {%- endif %}
+          Find a charger immediately!
+        data:
+          tag: "xpcardata_critical_soc"
+          priority: high
+          # For iOS critical alert:
+          # push:
+          #   sound:
+          #     name: default
+          #     critical: 1
+          #     volume: 1.0
+  mode: single
+
+# 7. Charging Target Reached (80%)
+# Notify when SOC reaches 80% during charging - good time to unplug for battery health
+- id: xpcardata_charging_target_reached
+  alias: "XPCarData: Charging Target Reached (80%)"
+  description: "Notify when SOC reaches 80% during charging"
+  trigger:
+    - platform: mqtt
+      topic: "vehicles/+/data"
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json.stateOfCharge is defined
+           and trigger.payload_json.stateOfCharge >= 80
+           and trigger.payload_json.stateOfCharge < 82
+           and trigger.payload_json.batteryCurrent is defined
+           and trigger.payload_json.batteryCurrent < -1 }}
+  action:
+    - service: notify.notify  # <-- Change to your notify service
+      data:
+        title: "🔋 Charging Target Reached"
+        message: >
+          Battery at {{ trigger.payload_json.stateOfCharge | round(1) }}%
+          Consider stopping to preserve battery health
+        data:
+          tag: "xpcardata_charge_target"
+          priority: default
+  mode: single
+
+# 8. Full Charge Complete (100%)
+# Notify when battery is fully charged
+- id: xpcardata_full_charge_complete
+  alias: "XPCarData: Full Charge Complete"
+  description: "Notify when battery reaches 100%"
+  trigger:
+    - platform: mqtt
+      topic: "vehicles/+/data"
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json.stateOfCharge is defined
+           and trigger.payload_json.stateOfCharge >= 99.5 }}
+  action:
+    - service: notify.notify  # <-- Change to your notify service
+      data:
+        title: "⚡ Fully Charged!"
+        message: "Battery at 100% - Unplug when convenient"
+        data:
+          tag: "xpcardata_full_charge"
+          priority: default
+  mode: single
+
+# --------------------------------------
+# CHARGING SESSION SUMMARY
+# --------------------------------------
+
+# 9. Charging Session Summary
+# Send a detailed summary when charging session ends
+- id: xpcardata_charging_session_summary
+  alias: "XPCarData: Charging Session Summary"
+  description: "Send detailed summary when charging session ends"
+  trigger:
+    - platform: mqtt
+      topic: "vehicles/+/charging"
+  condition:
+    - condition: template
+      value_template: "{{ trigger.payload_json.status == 'STOP' }}"
+  action:
+    - service: notify.notify  # <-- Change to your notify service
+      data:
+        title: "📊 Charging Session Summary"
+        message: >
+          {{ trigger.payload_json.chargingType | upper if trigger.payload_json.chargingType else 'Unknown' }} Charging Complete
+
+          SOC: {{ trigger.payload_json.startSoc | round(1) }}% → {{ trigger.payload_json.endSoc | round(1) }}%
+          {%- if trigger.payload_json.energyAddedKwh is defined %}
+          Energy: {{ trigger.payload_json.energyAddedKwh | round(1) }} kWh
+          {%- endif %}
+          {%- if trigger.payload_json.maxPowerKw is defined and trigger.payload_json.maxPowerKw > 0 %}
+          Max Power: {{ trigger.payload_json.maxPowerKw | round(1) }} kW
+          {%- endif %}
+          {%- if trigger.payload_json.duration is defined %}
+          Duration: {{ trigger.payload_json.duration }}
+          {%- endif %}
+          {%- if trigger.payload_json.locationName is defined %}
+          Location: {{ trigger.payload_json.locationName }}
+          {%- endif %}
+        data:
+          tag: "xpcardata_session_summary"
+          priority: low
+
+# --------------------------------------
+# TEMPERATURE ALERTS
+# --------------------------------------
+
+# 10. High Battery Temperature Warning
+# Alert when battery temperature exceeds 40°C
+- id: xpcardata_high_battery_temp
+  alias: "XPCarData: High Battery Temperature"
+  description: "Warn when battery temperature is high"
+  trigger:
+    - platform: mqtt
+      topic: "vehicles/+/data"
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json.batteryTemperature is defined
+           and trigger.payload_json.batteryTemperature > 40 }}
+  action:
+    - service: notify.notify  # <-- Change to your notify service
+      data:
+        title: "🌡️ High Battery Temperature"
+        message: "Battery temperature: {{ trigger.payload_json.batteryTemperature | round(1) }}°C"
+        data:
+          tag: "xpcardata_high_temp"
+          priority: high
+  mode: single
+
+# --------------------------------------
+# LOCATION-BASED (Optional)
+# --------------------------------------
+
+# 11. Arrived Home - Reminder to Plug In
+# Remind to plug in if SOC is below 80% when arriving home
+# Requires a zone named 'home' in Home Assistant
+- id: xpcardata_home_plug_reminder
+  alias: "XPCarData: Home Plug-In Reminder"
+  description: "Remind to plug in when arriving home with low SOC"
+  trigger:
+    - platform: mqtt
+      topic: "vehicles/+/data"
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.payload_json.stateOfCharge is defined
+           and trigger.payload_json.stateOfCharge < 80
+           and trigger.payload_json.latitude is defined
+           and trigger.payload_json.longitude is defined }}
+    # Add zone check - customize lat/long for your home
+    # - condition: template
+    #   value_template: >
+    #     {{ distance(trigger.payload_json.latitude, trigger.payload_json.longitude, 'zone.home') < 0.1 }}
+  action:
+    - service: notify.notify  # <-- Change to your notify service
+      data:
+        title: "🏠 Home - Remember to Plug In"
+        message: "Battery at {{ trigger.payload_json.stateOfCharge | round(1) }}%"
+        data:
+          tag: "xpcardata_plug_reminder"
+          priority: low
+  mode: single
