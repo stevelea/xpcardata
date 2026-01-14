@@ -502,6 +502,14 @@ class ChargingSessionService {
       status: 'START',
       currentOdometer: startOdo,
     );
+
+    // Publish charging started notification
+    _mqttService?.publishChargingNotification(
+      event: 'CHARGE_STARTED',
+      soc: data.stateOfCharge ?? 0,
+      chargingType: type.name,
+      powerKw: powerKw,
+    );
   }
 
   /// Capture GPS location asynchronously and update session
@@ -741,6 +749,15 @@ class ChargingSessionService {
         completedSession,
         status: 'STOP',
         currentOdometer: completedSession.endOdometer,
+      );
+
+      // Publish charging stopped notification
+      _mqttService?.publishChargingNotification(
+        event: 'CHARGE_STOPPED',
+        soc: completedSession.endSoc ?? completedSession.startSoc,
+        chargingType: completedSession.chargingType,
+        powerKw: completedSession.maxPowerKw,
+        locationName: completedSession.locationName,
       );
       _logger.log('[Charging] Session saved and published to MQTT');
     } else {

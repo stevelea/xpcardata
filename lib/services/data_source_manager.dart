@@ -913,6 +913,13 @@ class DataSourceManager {
         _auxBatteryProtectionActive = false;
         _obdService.resumePolling();
         _logger.log('[DataSourceManager] 12V protection DISABLED by user - OBD polling RESUMED');
+
+        // Clear the MQTT alert
+        _mqttService?.publishSystemAlert(
+          alertType: '12v_low',
+          isActive: false,
+          message: '12V protection disabled by user - OBD polling resumed',
+        );
       }
     }
 
@@ -925,6 +932,14 @@ class DataSourceManager {
         _auxBatteryProtectionActive = false;
         _obdService.resumePolling();
         _logger.log('[DataSourceManager] 12V protection threshold LOWERED to ${threshold}V - OBD polling RESUMED');
+
+        // Clear the MQTT alert
+        _mqttService?.publishSystemAlert(
+          alertType: '12v_low',
+          isActive: false,
+          message: 'Threshold lowered to ${threshold}V - OBD polling resumed',
+          additionalData: {'new_threshold': threshold},
+        );
       }
     }
 
@@ -946,6 +961,17 @@ class DataSourceManager {
         _auxBatteryProtectionActive = true;
         _obdService.pausePolling();
         _logger.log('[DataSourceManager] 12V BATTERY PROTECTION ACTIVATED: ${auxVoltage.toStringAsFixed(2)}V < ${_auxBatteryProtectionThreshold}V - OBD polling PAUSED');
+
+        // Publish MQTT system alert
+        _mqttService?.publishSystemAlert(
+          alertType: '12v_low',
+          isActive: true,
+          message: '12V battery low (${auxVoltage.toStringAsFixed(1)}V) - OBD polling disabled',
+          additionalData: {
+            'voltage': auxVoltage,
+            'threshold': _auxBatteryProtectionThreshold,
+          },
+        );
       }
     } else {
       // Check if we can deactivate protection (voltage recovered above threshold + hysteresis)
@@ -954,6 +980,17 @@ class DataSourceManager {
         _auxBatteryProtectionActive = false;
         _obdService.resumePolling();
         _logger.log('[DataSourceManager] 12V battery recovered: ${auxVoltage.toStringAsFixed(2)}V >= ${resumeThreshold.toStringAsFixed(1)}V - OBD polling RESUMED');
+
+        // Publish MQTT alert clear
+        _mqttService?.publishSystemAlert(
+          alertType: '12v_low',
+          isActive: false,
+          message: '12V battery recovered (${auxVoltage.toStringAsFixed(1)}V) - OBD polling resumed',
+          additionalData: {
+            'voltage': auxVoltage,
+            'threshold': _auxBatteryProtectionThreshold,
+          },
+        );
       }
     }
   }

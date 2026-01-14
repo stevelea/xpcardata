@@ -184,6 +184,65 @@ class MqttService {
     }
   }
 
+  /// Publish system alert (12V battery, connectivity issues, etc.)
+  /// [alertType] identifies the alert: '12v_low', 'obd_disconnected', etc.
+  /// [isActive] true = alert is active, false = alert cleared
+  /// Publishes to vehicles/{id}/system_alert with retain flag for HA persistence
+  Future<void> publishSystemAlert({
+    required String alertType,
+    required bool isActive,
+    required String message,
+    Map<String, dynamic>? additionalData,
+  }) async {
+    if (!isConnected || _vehicleId == null) {
+      return;
+    }
+
+    try {
+      final topic = 'vehicles/$_vehicleId/system_alert';
+      final payload = jsonEncode({
+        'alert_type': alertType,
+        'status': isActive ? 'ALERT' : 'CLEAR',
+        'message': message,
+        'timestamp': DateTime.now().toIso8601String(),
+        if (additionalData != null) ...additionalData,
+      });
+      _publishMessage(topic, payload, MqttQos.atLeastOnce, retain: true);
+    } catch (e) {
+      // Silently fail
+    }
+  }
+
+  /// Publish charging notification (start/stop events with SOC)
+  /// [event] is 'CHARGE_STARTED' or 'CHARGE_STOPPED'
+  /// Publishes to vehicles/{id}/charging_notification for HA automations
+  Future<void> publishChargingNotification({
+    required String event,
+    required double soc,
+    String? chargingType,
+    double? powerKw,
+    String? locationName,
+  }) async {
+    if (!isConnected || _vehicleId == null) {
+      return;
+    }
+
+    try {
+      final topic = 'vehicles/$_vehicleId/charging_notification';
+      final payload = jsonEncode({
+        'event': event,
+        'soc': soc,
+        if (chargingType != null) 'charging_type': chargingType,
+        if (powerKw != null) 'power_kw': powerKw,
+        if (locationName != null) 'location': locationName,
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+      _publishMessage(topic, payload, MqttQos.atLeastOnce, retain: true);
+    } catch (e) {
+      // Silently fail
+    }
+  }
+
   /// Publish charging session to MQTT with retain flag
   /// [status] can be 'START', 'UPDATE', or 'STOP'
   /// [currentOdometer] is the current vehicle odometer reading
@@ -464,6 +523,56 @@ class MqttService {
       retain: true,
     );
 
+    // Publish sensor for system alerts (12V battery low, etc.)
+    final systemAlertTopic = 'vehicles/$_vehicleId/system_alert';
+    final systemAlertDiscoveryTopic = '$_discoveryPrefix/sensor/$nodeId/system_alert/config';
+    final systemAlertConfig = {
+      'name': 'System Alert',
+      'unique_id': '${nodeId}_system_alert',
+      'state_topic': systemAlertTopic,
+      'availability_topic': availabilityTopic,
+      'availability_template': '{{ value_json.status }}',
+      'payload_available': 'online',
+      'payload_not_available': 'offline',
+      'device': device,
+      'value_template': '{{ value_json.status }}',
+      'icon': 'mdi:alert-circle',
+      'json_attributes_topic': systemAlertTopic,
+      'json_attributes_template': '{{ value_json | tojson }}',
+    };
+
+    _publishMessage(
+      systemAlertDiscoveryTopic,
+      jsonEncode(systemAlertConfig),
+      MqttQos.atLeastOnce,
+      retain: true,
+    );
+
+    // Publish sensor for charging notifications
+    final chargingNotificationTopic = 'vehicles/$_vehicleId/charging_notification';
+    final chargingNotificationDiscoveryTopic = '$_discoveryPrefix/sensor/$nodeId/charging_notification/config';
+    final chargingNotificationConfig = {
+      'name': 'Charging Event',
+      'unique_id': '${nodeId}_charging_notification',
+      'state_topic': chargingNotificationTopic,
+      'availability_topic': availabilityTopic,
+      'availability_template': '{{ value_json.status }}',
+      'payload_available': 'online',
+      'payload_not_available': 'offline',
+      'device': device,
+      'value_template': '{{ value_json.event }}',
+      'icon': 'mdi:ev-station',
+      'json_attributes_topic': chargingNotificationTopic,
+      'json_attributes_template': '{{ value_json | tojson }}',
+    };
+
+    _publishMessage(
+      chargingNotificationDiscoveryTopic,
+      jsonEncode(chargingNotificationConfig),
+      MqttQos.atLeastOnce,
+      retain: true,
+    );
+
     _discoveryPublished = true;
   }
 
@@ -472,7 +581,7 @@ class MqttService {
     if (_vehicleId == null || !isConnected) return;
 
     final nodeId = _vehicleId!.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_').toLowerCase();
-    final sensorIds = ['soc', 'soh', 'voltage', 'current', 'temperature', 'power', 'range', 'speed', 'odometer', 'capacity'];
+    final sensorIds = ['soc', 'soh', 'voltage', 'current', 'temperature', 'power', 'range', 'speed', 'odometer', 'capacity', 'system_alert', 'charging_notification'];
 
     // Remove sensor configs by publishing empty retained message
     for (final objectId in sensorIds) {
