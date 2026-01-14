@@ -81,6 +81,11 @@ class ChargingSessionService {
   static const double _minChargeChange = 0.1; // Ah
   static const double _maxSpeedForCharging = 1.0; // km/h - must be stationary to charge
 
+  // Minimum session thresholds to filter out false positives (e.g., brief stops, regen)
+  static const int _minSessionDurationSeconds = 120; // 2 minutes minimum
+  static const double _minSocGainForSave = 1.0; // At least 1% SOC gain
+  static const double _minEnergyKwhForSave = 0.5; // At least 0.5 kWh added
+
   final StreamController<ChargingSession> _sessionController =
       StreamController<ChargingSession>.broadcast();
 
@@ -688,23 +693,27 @@ class ChargingSessionService {
       _logger.log('[Charging] Consumption: ${completedSession.consumptionKwhPer100km?.toStringAsFixed(1)} kWh/100km');
     }
 
-    // Determine if session is worth saving - use multiple criteria:
-    // 1. Energy added (kWh) >= 0.1 kWh (from cumulative charge or accumulated power)
-    // 2. OR SOC gained >= 0.5% (fallback if energy isn't available)
-    // 3. OR max power > 0 and duration > 1 minute (indicates actual charging occurred)
+    // Determine if session is worth saving - stricter criteria to avoid false positives:
+    // Must meet MINIMUM DURATION (2 minutes) AND at least one of:
+    // 1. Energy added (kWh) >= 0.5 kWh
+    // 2. SOC gained >= 1.0%
+    // This prevents brief stops or regen events from creating false charging sessions
+    // Note: Min AC charging is 6A @ 240V = 1.44kW, so 2 mins would add ~0.05 kWh minimum
     final energyKwh = completedSession.energyAddedKwh ?? _accumulatedEnergyKwh;
     final socGained = completedSession.socGained ?? 0;
-    final durationMins = completedSession.duration?.inMinutes ?? 0;
+    final durationSecs = completedSession.duration?.inSeconds ?? 0;
     final maxPower = completedSession.maxPowerKw ?? 0;
 
-    final hasSignificantEnergy = energyKwh >= 0.1;
-    final hasSignificantSocGain = socGained >= 0.5;
-    final hasChargedWithPower = maxPower > 0 && durationMins >= 1;
+    final hasMinDuration = durationSecs >= _minSessionDurationSeconds;
+    final hasSignificantEnergy = energyKwh >= _minEnergyKwhForSave;
+    final hasSignificantSocGain = socGained >= _minSocGainForSave;
 
-    final shouldSave = hasSignificantEnergy || hasSignificantSocGain || hasChargedWithPower;
-    _logger.log('[Charging] Save criteria: energyKwh=${energyKwh.toStringAsFixed(2)} (>=0.1?$hasSignificantEnergy), '
-        'socGain=${socGained.toStringAsFixed(1)}% (>=0.5%?$hasSignificantSocGain), '
-        'power+duration?$hasChargedWithPower => SAVE?$shouldSave');
+    // Must have minimum duration AND either significant energy or SOC gain
+    final shouldSave = hasMinDuration && (hasSignificantEnergy || hasSignificantSocGain);
+    _logger.log('[Charging] Save criteria: duration=${durationSecs}s (>=$_minSessionDurationSeconds s?$hasMinDuration), '
+        'energyKwh=${energyKwh.toStringAsFixed(2)} (>=$_minEnergyKwhForSave?$hasSignificantEnergy), '
+        'socGain=${socGained.toStringAsFixed(1)}% (>=$_minSocGainForSave%?$hasSignificantSocGain), '
+        'maxPower=${maxPower.toStringAsFixed(1)}kW => SAVE?$shouldSave');
 
     if (shouldSave) {
       // Always save to in-memory storage first (works everywhere)
