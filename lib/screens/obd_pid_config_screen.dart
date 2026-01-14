@@ -125,14 +125,29 @@ class _OBDPIDConfigScreenState extends State<OBDPIDConfigScreen> {
       } catch (e) {
         // path_provider failed, use hardcoded Android path
         filePath = '/data/data/com.example.carsoc/files/obd_pids.json';
+        debugPrint('[PID Save] path_provider failed, using hardcoded path');
       }
 
       final file = File(filePath);
+
+      // Ensure parent directory exists
+      final parent = file.parent;
+      if (!await parent.exists()) {
+        await parent.create(recursive: true);
+        debugPrint('[PID Save] Created directory: ${parent.path}');
+      }
+
       final pidsJson = json.encode(_pids.map((p) => p.toJson()).toList());
       await file.writeAsString(pidsJson);
-      debugPrint('PIDs saved to file: $filePath');
+      debugPrint('[PID Save] Saved ${_pids.length} PIDs to file: $filePath');
+
+      // Verify the file was written
+      if (await file.exists()) {
+        final length = await file.length();
+        debugPrint('[PID Save] File verified: $length bytes');
+      }
     } catch (e) {
-      debugPrint('File-based PID storage failed: $e');
+      debugPrint('[PID Save] File-based PID storage failed: $e');
     }
   }
 
@@ -292,7 +307,7 @@ class _OBDPIDConfigScreenState extends State<OBDPIDConfigScreen> {
       _pids = List.from(profile.pids);
       _selectedVehicleProfile = profile.name;
     });
-    _savePIDs();
+    await _savePIDs();  // Must await to ensure PIDs are saved before confirming
 
     // Save selected profile and init commands
     try {
