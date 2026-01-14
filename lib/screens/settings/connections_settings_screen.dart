@@ -5,6 +5,7 @@ import '../../providers/mqtt_provider.dart';
 import '../../services/tailscale_service.dart';
 import '../../services/obd_proxy_service.dart';
 import '../../services/obd_service.dart';
+import '../../services/hive_storage_service.dart';
 import '../obd_connection_screen.dart';
 
 /// Connections settings sub-screen
@@ -56,6 +57,9 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
   }
 
   Future<void> _loadSettings() async {
+    final hive = HiveStorageService.instance;
+
+    // Try SharedPreferences first, then Hive fallback
     try {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
@@ -70,8 +74,25 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
         _mqttReconnectIntervalSeconds = prefs.getInt('mqtt_reconnect_interval') ?? 0;
         _tailscaleAutoConnect = prefs.getBool('tailscale_auto_connect') ?? false;
       });
+      debugPrint('[Connections] Loaded settings from SharedPreferences');
     } catch (e) {
-      debugPrint('Failed to load settings: $e');
+      debugPrint('[Connections] SharedPreferences failed: $e');
+      // Fallback to Hive
+      if (hive.isAvailable) {
+        setState(() {
+          _brokerController.text = hive.getSetting<String>('mqtt_broker') ?? '';
+          _portController.text = (hive.getSetting<int>('mqtt_port') ?? 8883).toString();
+          _usernameController.text = hive.getSetting<String>('mqtt_username') ?? '';
+          _passwordController.text = hive.getSetting<String>('mqtt_password') ?? '';
+          _vehicleIdController.text = hive.getSetting<String>('mqtt_vehicle_id') ?? '';
+          _useTLS = hive.getSetting<bool>('mqtt_use_tls') ?? true;
+          _mqttEnabled = hive.getSetting<bool>('mqtt_enabled') ?? false;
+          _haDiscoveryEnabled = hive.getSetting<bool>('ha_discovery_enabled') ?? false;
+          _mqttReconnectIntervalSeconds = hive.getSetting<int>('mqtt_reconnect_interval') ?? 0;
+          _tailscaleAutoConnect = hive.getSetting<bool>('tailscale_auto_connect') ?? false;
+        });
+        debugPrint('[Connections] Loaded settings from Hive');
+      }
     }
   }
 
@@ -92,29 +113,53 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
   }
 
   Future<void> _autoSaveString(String key, String value) async {
+    final hive = HiveStorageService.instance;
+
+    // Always save to Hive (reliable on AAOS)
+    if (hive.isAvailable) {
+      await hive.saveSetting(key, value);
+    }
+
+    // Also try SharedPreferences
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(key, value);
     } catch (e) {
-      debugPrint('Failed to save $key: $e');
+      debugPrint('[Connections] SharedPreferences save failed for $key: $e');
     }
   }
 
   Future<void> _autoSaveInt(String key, int value) async {
+    final hive = HiveStorageService.instance;
+
+    // Always save to Hive (reliable on AAOS)
+    if (hive.isAvailable) {
+      await hive.saveSetting(key, value);
+    }
+
+    // Also try SharedPreferences
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(key, value);
     } catch (e) {
-      debugPrint('Failed to save $key: $e');
+      debugPrint('[Connections] SharedPreferences save failed for $key: $e');
     }
   }
 
   Future<void> _autoSaveBool(String key, bool value) async {
+    final hive = HiveStorageService.instance;
+
+    // Always save to Hive (reliable on AAOS)
+    if (hive.isAvailable) {
+      await hive.saveSetting(key, value);
+    }
+
+    // Also try SharedPreferences
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(key, value);
     } catch (e) {
-      debugPrint('Failed to save $key: $e');
+      debugPrint('[Connections] SharedPreferences save failed for $key: $e');
     }
   }
 

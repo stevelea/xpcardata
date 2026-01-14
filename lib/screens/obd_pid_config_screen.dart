@@ -492,38 +492,61 @@ class _OBDPIDConfigScreenState extends State<OBDPIDConfigScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      isExpanded: true,
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            decoration: InputDecoration(
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              filled: true,
+                              fillColor: Theme.of(context).colorScheme.surface,
+                            ),
+                            hint: Text(
+                              'Select your vehicle',
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            ),
+                            initialValue: _localProfiles.any((p) => p.name == _selectedVehicleProfile)
+                                ? _selectedVehicleProfile
+                                : null,
+                            items: _localProfiles
+                                .map((profile) => DropdownMenuItem(
+                                      value: profile.name,
+                                      child: Text(
+                                        '${profile.name} (${profile.year})',
+                                        style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+                                      ),
+                                    ))
+                                .toList(),
+                            onChanged: (value) {
+                              if (value != null) {
+                                final profile = _localProfiles.firstWhere((p) => p.name == value);
+                                _loadLocalProfile(profile);
+                              }
+                            },
+                          ),
                         ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        filled: true,
-                        fillColor: Theme.of(context).colorScheme.surface,
-                      ),
-                      hint: Text(
-                        'Select your vehicle',
-                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                      ),
-                      initialValue: _localProfiles.any((p) => p.name == _selectedVehicleProfile)
-                          ? _selectedVehicleProfile
-                          : null,
-                      items: _localProfiles
-                          .map((profile) => DropdownMenuItem(
-                                value: profile.name,
-                                child: Text(
-                                  '${profile.name} (${profile.year})',
-                                  style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-                                ),
-                              ))
-                          .toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          final profile = _localProfiles.firstWhere((p) => p.name == value);
-                          _loadLocalProfile(profile);
-                        }
-                      },
+                        const SizedBox(width: 8),
+                        ElevatedButton.icon(
+                          onPressed: _selectedVehicleProfile != null &&
+                                  _localProfiles.any((p) => p.name == _selectedVehicleProfile)
+                              ? () {
+                                  final profile = _localProfiles.firstWhere(
+                                      (p) => p.name == _selectedVehicleProfile);
+                                  _loadLocalProfile(profile);
+                                }
+                              : null,
+                          icon: const Icon(Icons.download, size: 18),
+                          label: const Text('Load'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
