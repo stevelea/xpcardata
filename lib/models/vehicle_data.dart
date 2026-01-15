@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:intl/intl.dart';
 
 class VehicleData {
   final DateTime timestamp;
@@ -101,8 +102,29 @@ class VehicleData {
 
   /// Convert to JSON for MQTT transmission
   Map<String, dynamic> toJson() {
+    // Determine actual charging status based on current/power
+    // Negative current = charging (current flowing INTO battery)
+    // Speed must be near zero to distinguish from regenerative braking
+    final bool isStationary = (speed ?? 0) < 1.0;
+    final bool currentIndicatesCharging = (batteryCurrent ?? 0) < -0.5;
+    final bool powerIndicatesCharging = (power ?? 0) < -0.5;
+    final bool isCharging = isStationary && (currentIndicatesCharging || powerIndicatesCharging);
+
+    // Determine charging type based on power level
+    String chargingStatus;
+    if (isCharging) {
+      final absPower = (power ?? 0).abs();
+      chargingStatus = absPower > 11.0 ? 'DC Charging' : 'AC Charging';
+    } else {
+      chargingStatus = 'Not Charging';
+    }
+
+    // Format local time in human-readable format
+    final localTime = DateFormat('yyyy-MM-dd HH:mm:ss').format(timestamp.toLocal());
+
     return {
       'timestamp': timestamp.toIso8601String(),
+      'localTime': localTime,
       'stateOfCharge': stateOfCharge,
       'stateOfHealth': stateOfHealth,
       'batteryCapacity': batteryCapacity,
@@ -120,6 +142,8 @@ class VehicleData {
       'altitude': altitude,
       'gpsSpeed': gpsSpeed,
       'heading': heading,
+      'chargingStatus': chargingStatus,
+      'isCharging': isCharging,
       if (additionalProperties != null) ...additionalProperties!,
     };
   }

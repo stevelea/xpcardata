@@ -468,6 +468,19 @@ class MqttService {
         'icon': 'mdi:compass',
         'state_class': 'measurement',
       },
+      {
+        'name': 'Charging Status',
+        'object_id': 'charging_status',
+        'value_template': '{{ value_json.chargingStatus | default("Unknown") }}',
+        'icon': 'mdi:ev-station',
+      },
+      {
+        'name': 'Local Time',
+        'object_id': 'local_time',
+        'device_class': 'timestamp',
+        'value_template': '{{ value_json.localTime | default("") }}',
+        'icon': 'mdi:clock-outline',
+      },
     ];
 
     // Publish discovery config for each sensor
@@ -511,7 +524,7 @@ class MqttService {
       'payload_not_available': 'offline',
       'device': device,
       'device_class': 'battery_charging',
-      'value_template': '{{ "ON" if (value_json.batteryCurrent | default(0) | float) > 0 else "OFF" }}',
+      'value_template': '{{ "ON" if value_json.isCharging | default(false) else "OFF" }}',
       'payload_on': 'ON',
       'payload_off': 'OFF',
     };
