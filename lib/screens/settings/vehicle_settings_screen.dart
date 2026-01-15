@@ -19,18 +19,51 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
   bool? _locationEnabled; // null = not yet loaded, use Hive/DataSourceManager
 
   static const Map<String, double> _batteryCapacities = {
+    // XPENG G6
+    'G6_24LR': 87.5,
+    'G6_24SR': 66.0,
+    'G6_25LR': 80.8,
+    'G6_25SR': 68.5,
+    // XPENG G9
+    'G9_LR_AWD': 93.0,
+    'G9_LR_RWD': 93.0,
+    'G9_SR_RWD': 75.0,
+    // XPENG P7
+    'P7_LR_RWD': 82.7,
+    // Legacy keys
     '24LR': 87.5,
     '24SR': 66.0,
     '25LR': 80.8,
     '25SR': 68.5,
   };
 
+  // Display labels for vehicle selection (only new keys shown in picker)
   static const Map<String, String> _modelLabels = {
-    '24LR': '2024 LR/AWD (87.5 kWh)',
-    '24SR': '2024 SR (66 kWh)',
-    '25LR': '2025 LR/AWD (80.8 kWh)',
-    '25SR': '2025 SR (68.5 kWh)',
+    // XPENG G6
+    'G6_24LR': 'G6 2024 LR/AWD (87.5 kWh)',
+    'G6_24SR': 'G6 2024 SR (66 kWh)',
+    'G6_25LR': 'G6 2025 LR/AWD (80.8 kWh)',
+    'G6_25SR': 'G6 2025 SR (68.5 kWh)',
+    // XPENG G9
+    'G9_LR_AWD': 'G9 AWD Long Range (93 kWh)',
+    'G9_LR_RWD': 'G9 RWD Long Range (93 kWh)',
+    'G9_SR_RWD': 'G9 RWD Standard Range (75 kWh)',
+    // XPENG P7
+    'P7_LR_RWD': 'P7 RWD Long Range (82.7 kWh)',
   };
+
+  // Legacy key mappings for display (existing users with old keys)
+  static const Map<String, String> _legacyLabels = {
+    '24LR': 'G6 2024 LR/AWD (87.5 kWh)',
+    '24SR': 'G6 2024 SR (66 kWh)',
+    '25LR': 'G6 2025 LR/AWD (80.8 kWh)',
+    '25SR': 'G6 2025 SR (68.5 kWh)',
+  };
+
+  /// Get display label for any model key (new or legacy)
+  String _getModelLabel(String key) {
+    return _modelLabels[key] ?? _legacyLabels[key] ?? 'Unknown';
+  }
 
   @override
   void initState() {
@@ -141,7 +174,7 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
                   ListTile(
                     leading: const Icon(Icons.directions_car),
                     title: const Text('Vehicle Model'),
-                    subtitle: Text(_modelLabels[_vehicleModel] ?? 'Unknown'),
+                    subtitle: Text(_getModelLabel(_vehicleModel)),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: _showVehicleModelPicker,
                   ),

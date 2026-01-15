@@ -10,12 +10,24 @@ import 'mqtt_provider.dart';
 
 // ==================== Vehicle Settings ====================
 
-/// Battery capacities by vehicle model (kWh)
+/// Battery capacities by vehicle model (kWh) - usable capacity
 const Map<String, double> vehicleBatteryCapacities = {
-  '24LR': 87.5,   // 2024 Long Range / AWD
-  '24SR': 66.0,   // 2024 Standard Range
-  '25LR': 80.8,   // 2025 Long Range / AWD
-  '25SR': 68.5,   // 2025 Standard Range
+  // XPENG G6
+  'G6_24LR': 87.5,   // G6 2024 Long Range / AWD
+  'G6_24SR': 66.0,   // G6 2024 Standard Range
+  'G6_25LR': 80.8,   // G6 2025 Long Range / AWD
+  'G6_25SR': 68.5,   // G6 2025 Standard Range
+  // XPENG G9
+  'G9_LR_AWD': 93.0, // G9 AWD Long Range (NMC)
+  'G9_LR_RWD': 93.0, // G9 RWD Long Range (NMC)
+  'G9_SR_RWD': 75.0, // G9 RWD Standard Range (LFP) - ~75 kWh usable
+  // XPENG P7
+  'P7_LR_RWD': 82.7, // P7 RWD Long Range (NMC)
+  // Legacy keys for backwards compatibility
+  '24LR': 87.5,
+  '24SR': 66.0,
+  '25LR': 80.8,
+  '25SR': 68.5,
 };
 
 /// Vehicle model provider - loads from SharedPreferences
