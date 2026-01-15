@@ -441,10 +441,34 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
   Future<void> _initializeMqtt() async {
     Map<String, dynamic>? settings;
 
-    // Try to load settings from file first (more reliable)
-    settings = await _loadSettingsFromFile();
+    // Try Hive first (most reliable on AAOS devices)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      final mqttEnabled = hive.getSetting<bool>('mqtt_enabled');
+      if (mqttEnabled != null) {
+        settings = {
+          'mqtt_enabled': mqttEnabled,
+          'mqtt_broker': hive.getSetting<String>('mqtt_broker') ?? 'mqtt.eclipseprojects.io',
+          'mqtt_port': hive.getSetting<int>('mqtt_port') ?? 1883,
+          'mqtt_vehicle_id': hive.getSetting<String>('mqtt_vehicle_id') ?? 'vehicle_001',
+          'mqtt_username': hive.getSetting<String>('mqtt_username'),
+          'mqtt_password': hive.getSetting<String>('mqtt_password'),
+          'mqtt_use_tls': hive.getSetting<bool>('mqtt_use_tls') ?? false,
+          'ha_discovery_enabled': hive.getSetting<bool>('ha_discovery_enabled') ?? false,
+        };
+        print('MQTT settings loaded from Hive');
+      }
+    }
 
-    // If file failed, try SharedPreferences
+    // Fall back to file storage
+    if (settings == null) {
+      settings = await _loadSettingsFromFile();
+      if (settings != null && settings['mqtt_enabled'] == true) {
+        print('MQTT settings loaded from file');
+      }
+    }
+
+    // Fall back to SharedPreferences as last resort
     if (settings == null) {
       try {
         final prefs = await SharedPreferences.getInstance();
@@ -458,6 +482,9 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
           'mqtt_use_tls': prefs.getBool('mqtt_use_tls') ?? false,
           'ha_discovery_enabled': prefs.getBool('ha_discovery_enabled') ?? false,
         };
+        if (settings['mqtt_enabled'] == true) {
+          print('MQTT settings loaded from SharedPreferences');
+        }
       } catch (e) {
         print('SharedPreferences failed: $e');
         return;
