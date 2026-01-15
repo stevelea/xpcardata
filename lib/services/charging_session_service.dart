@@ -259,6 +259,34 @@ class ChargingSessionService {
     _logger.log('[Charging] No previous session found for odometer reference');
   }
 
+  /// Find the last session with a DIFFERENT odometer than the current session
+  /// This handles the case where multiple charges happen at the same location
+  /// (e.g., charging at home twice without driving)
+  Future<double?> _findLastDifferentOdometer(double currentOdometer) async {
+    final allSessions = await getAllSessions();
+    if (allSessions.isEmpty) return null;
+
+    // Sort by time, most recent first
+    allSessions.sort((a, b) => b.startTime.compareTo(a.startTime));
+
+    // Tolerance for "same location" - within 1 km is considered same spot
+    const double odometerTolerance = 1.0;
+
+    for (final session in allSessions) {
+      if (!session.isActive && session.endOdometer != null) {
+        final difference = (currentOdometer - session.endOdometer!).abs();
+        if (difference > odometerTolerance) {
+          _logger.log('[Charging] Found previous different odometer: ${session.endOdometer?.toStringAsFixed(0)} km '
+              '(${difference.toStringAsFixed(1)} km difference)');
+          return session.endOdometer;
+        }
+      }
+    }
+
+    _logger.log('[Charging] No session found with different odometer');
+    return null;
+  }
+
   /// Get battery capacity from settings (cached after first load)
   /// Returns capacity in kWh based on vehicle model from settings
   Future<double> _getBatteryCapacityKwh() async {
@@ -626,13 +654,28 @@ class ChargingSessionService {
     final currentOdo = data.odometer;
     final endOdo = (currentOdo != null && currentOdo > 0) ? currentOdo : _lastKnownOdometer;
 
+    // Determine the correct previous odometer for consumption calculation
+    // If the last session's odometer is the same as current (multiple charges at same location),
+    // look further back to find a session where we actually drove
+    double? effectivePreviousOdometer = _previousSessionEndOdometer;
+    final startOdo = _currentSession!.startOdometer;
+
+    if (_previousSessionEndOdometer != null) {
+      final distanceFromLastSession = (startOdo - _previousSessionEndOdometer!).abs();
+      if (distanceFromLastSession < 1.0) {
+        // Last session was at same location - find an earlier session with different odometer
+        _logger.log('[Charging] Same location as last charge (${distanceFromLastSession.toStringAsFixed(1)} km diff), looking further back...');
+        effectivePreviousOdometer = await _findLastDifferentOdometer(startOdo);
+      }
+    }
+
     var completedSession = _currentSession!.complete(
       endTime: data.timestamp,
       endCumulativeCharge: data.cumulativeCharge ?? _currentSession!.startCumulativeCharge,
       endSoc: effectiveEndSoc,
       endOdometer: endOdo,
       averageVoltage: _lastVoltage,
-      previousOdometer: _previousSessionEndOdometer,
+      previousOdometer: effectivePreviousOdometer,
       chargingCurve: _currentSessionSamples.isNotEmpty ? List.from(_currentSessionSamples) : null,
     );
 
