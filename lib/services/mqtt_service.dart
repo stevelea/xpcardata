@@ -3,10 +3,13 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vehicle_data.dart';
 import '../models/alert.dart';
 import '../models/charging_session.dart';
+import '../providers/vehicle_data_provider.dart' show vehicleBatteryCapacities;
 import 'data_usage_service.dart';
+import 'hive_storage_service.dart';
 
 /// App version constant (updated during build)
 const String _appVersion = '1.2.0';
@@ -162,11 +165,43 @@ class MqttService {
 
     try {
       final topic = 'vehicles/$_vehicleId/data';
-      final payload = jsonEncode(data.toJson());
+      final json = data.toJson();
+
+      // Fill in battery capacity from user settings if not provided by OBD
+      if (json['batteryCapacity'] == null || json['batteryCapacity'] == 0) {
+        json['batteryCapacity'] = await _getBatteryCapacityFromSettings();
+      }
+
+      final payload = jsonEncode(json);
       _publishMessage(topic, payload, MqttQos.atLeastOnce, retain: true);
     } catch (e) {
       // Silently fail - connection issues will trigger reconnection
     }
+  }
+
+  /// Get battery capacity from user settings (cached)
+  double? _cachedBatteryCapacity;
+  Future<double> _getBatteryCapacityFromSettings() async {
+    if (_cachedBatteryCapacity != null) return _cachedBatteryCapacity!;
+
+    String vehicleModel = '24LR'; // Default
+
+    // Try Hive first (most reliable on AAOS)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      vehicleModel = hive.getSetting<String>('vehicle_model') ?? vehicleModel;
+    } else {
+      // Fall back to SharedPreferences
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        vehicleModel = prefs.getString('vehicle_model') ?? vehicleModel;
+      } catch (e) {
+        // Use default
+      }
+    }
+
+    _cachedBatteryCapacity = vehicleBatteryCapacities[vehicleModel] ?? 87.5;
+    return _cachedBatteryCapacity!;
   }
 
   /// Publish alert to MQTT
