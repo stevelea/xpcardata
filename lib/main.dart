@@ -17,6 +17,7 @@ import 'services/debug_logger.dart';
 import 'services/theme_service.dart';
 import 'services/open_charge_map_service.dart';
 import 'services/mock_data_service.dart';
+import 'services/healthcheck_service.dart';
 import 'providers/vehicle_data_provider.dart';
 import 'providers/mqtt_provider.dart';
 import 'screens/home_screen.dart';
@@ -219,6 +220,9 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
 
     // Initialize ABRP if enabled in settings
     await _initializeAbrp();
+
+    // Initialize healthcheck monitoring if enabled
+    await HealthcheckService.instance.initialize();
 
     // Auto-connect OBD Bluetooth if previously connected
     await _initializeObd();

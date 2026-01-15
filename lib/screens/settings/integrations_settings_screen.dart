@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/fleet_analytics_service.dart';
 import '../../services/hive_storage_service.dart';
+import '../../services/healthcheck_service.dart';
 import '../fleet_stats_screen.dart';
 
 /// Integrations settings sub-screen
@@ -25,6 +26,11 @@ class _IntegrationsSettingsScreenState extends ConsumerState<IntegrationsSetting
   bool _fleetAnalyticsEnabled = false;
   String _vehicleModel = '24LR';
 
+  // Healthcheck Settings
+  final _healthcheckUrlController = TextEditingController();
+  bool _healthcheckEnabled = false;
+  int _healthcheckIntervalSeconds = 60;
+
   @override
   void initState() {
     super.initState();
@@ -35,6 +41,7 @@ class _IntegrationsSettingsScreenState extends ConsumerState<IntegrationsSetting
   void dispose() {
     _abrpTokenController.dispose();
     _abrpCarModelController.dispose();
+    _healthcheckUrlController.dispose();
     super.dispose();
   }
 
@@ -70,6 +77,14 @@ class _IntegrationsSettingsScreenState extends ConsumerState<IntegrationsSetting
 
     // Load fleet analytics state (has its own Hive-based storage)
     _fleetAnalyticsEnabled = FleetAnalyticsService.instance.isEnabled;
+
+    // Load healthcheck settings
+    final healthcheck = HealthcheckService.instance;
+    setState(() {
+      _healthcheckEnabled = healthcheck.isEnabled;
+      _healthcheckUrlController.text = healthcheck.pingUrl ?? '';
+      _healthcheckIntervalSeconds = healthcheck.intervalSeconds;
+    });
   }
 
   Future<void> _autoSaveString(String key, String value) async {
@@ -127,6 +142,45 @@ class _IntegrationsSettingsScreenState extends ConsumerState<IntegrationsSetting
     if (seconds < 60) return '${seconds}s';
     if (seconds % 60 == 0) return '${seconds ~/ 60}m';
     return '${seconds ~/ 60}m ${seconds % 60}s';
+  }
+
+  String _formatHealthcheckInterval(int seconds) {
+    if (seconds < 60) return '${seconds}s';
+    if (seconds % 60 == 0) return '${seconds ~/ 60}m';
+    return '${seconds ~/ 60}m ${seconds % 60}s';
+  }
+
+  Future<void> _testHealthcheck() async {
+    final url = _healthcheckUrlController.text.trim();
+    if (url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a healthcheck URL')),
+      );
+      return;
+    }
+
+    // Show loading indicator
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Testing healthcheck...')),
+    );
+
+    // Configure and test
+    await HealthcheckService.instance.configure(
+      enabled: _healthcheckEnabled,
+      url: url,
+      intervalSeconds: _healthcheckIntervalSeconds,
+    );
+
+    final success = await HealthcheckService.instance.sendSuccess();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(success ? 'Healthcheck ping successful!' : 'Healthcheck ping failed'),
+        backgroundColor: success ? Colors.green : Colors.red,
+      ),
+    );
   }
 
   Future<bool?> _showFleetAnalyticsConsentDialog() async {
@@ -341,6 +395,97 @@ class _IntegrationsSettingsScreenState extends ConsumerState<IntegrationsSetting
                       label: const Text('View Fleet Statistics'),
                     ),
                   ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Healthcheck Section
+          _buildSectionHeader('Health Monitoring (healthchecks.io)'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SwitchListTile(
+                    title: const Text('Enable Health Monitoring'),
+                    subtitle: const Text('Ping healthchecks.io to monitor app status'),
+                    value: _healthcheckEnabled,
+                    onChanged: (value) async {
+                      setState(() => _healthcheckEnabled = value);
+                      await HealthcheckService.instance.configure(
+                        enabled: value,
+                        url: _healthcheckUrlController.text.trim(),
+                        intervalSeconds: _healthcheckIntervalSeconds,
+                      );
+                    },
+                    secondary: Icon(
+                      Icons.monitor_heart,
+                      color: _healthcheckEnabled ? Colors.green : Colors.grey,
+                    ),
+                  ),
+                  const Divider(),
+                  TextField(
+                    controller: _healthcheckUrlController,
+                    decoration: const InputDecoration(
+                      labelText: 'Ping URL',
+                      hintText: 'https://hc-ping.com/your-uuid-here',
+                      prefixIcon: Icon(Icons.link),
+                      helperText: 'Get your URL from healthchecks.io',
+                    ),
+                    enabled: _healthcheckEnabled,
+                    onChanged: (value) async {
+                      await HealthcheckService.instance.configure(
+                        enabled: _healthcheckEnabled,
+                        url: value.trim(),
+                        intervalSeconds: _healthcheckIntervalSeconds,
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  ListTile(
+                    title: const Text('Ping Interval'),
+                    subtitle: Text(_formatHealthcheckInterval(_healthcheckIntervalSeconds)),
+                  ),
+                  Slider(
+                    value: _healthcheckIntervalSeconds.toDouble(),
+                    min: 30,
+                    max: 300,
+                    divisions: 9,
+                    label: _formatHealthcheckInterval(_healthcheckIntervalSeconds),
+                    onChanged: _healthcheckEnabled
+                        ? (value) async {
+                            setState(() => _healthcheckIntervalSeconds = value.toInt());
+                            await HealthcheckService.instance.configure(
+                              enabled: _healthcheckEnabled,
+                              url: _healthcheckUrlController.text.trim(),
+                              intervalSeconds: value.toInt(),
+                            );
+                          }
+                        : null,
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _healthcheckEnabled ? _testHealthcheck : null,
+                          icon: const Icon(Icons.send),
+                          label: const Text('Test Ping'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Healthchecks.io monitors your app and alerts you if it stops sending pings. '
+                    'Create a free check at healthchecks.io and paste the ping URL above.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
                 ],
               ),
             ),
