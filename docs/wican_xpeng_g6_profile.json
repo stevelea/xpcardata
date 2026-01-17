@@ -1,0 +1,339 @@
+{
+  "car_model": "XPENG G6",
+  "init": "ATH1;ATSP6;ATS0;ATM0;ATAT1;ATFCSM1",
+  "pids": [
+    {
+      "name": "SOC",
+      "pid": "221109",
+      "pid_header": "704",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "%",
+      "math": "/10",
+      "interval": 5000,
+      "class": "battery",
+      "note": "State of Charge - High Voltage Battery"
+    },
+    {
+      "name": "SOH",
+      "pid": "22110A",
+      "pid_header": "704",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "%",
+      "math": "/10",
+      "interval": 300000,
+      "class": "battery",
+      "note": "State of Health - Battery degradation indicator"
+    },
+    {
+      "name": "HV Voltage",
+      "pid": "221101",
+      "pid_header": "704",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "V",
+      "math": "/10",
+      "interval": 5000,
+      "class": "voltage",
+      "note": "High Voltage Battery Pack Voltage"
+    },
+    {
+      "name": "HV Current",
+      "pid": "221103",
+      "pid_header": "704",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "A",
+      "math": "*0.5-1600",
+      "interval": 5000,
+      "class": "current",
+      "note": "HV Battery Current - Negative=Charging, Positive=Discharging"
+    },
+    {
+      "name": "Cell Voltage Max",
+      "pid": "221105",
+      "pid_header": "704",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "V",
+      "math": "/1000",
+      "interval": 60000,
+      "class": "voltage",
+      "note": "Maximum cell voltage in pack"
+    },
+    {
+      "name": "Cell Voltage Min",
+      "pid": "221106",
+      "pid_header": "704",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "V",
+      "math": "/1000",
+      "interval": 60000,
+      "class": "voltage",
+      "note": "Minimum cell voltage in pack"
+    },
+    {
+      "name": "Battery Temp Max",
+      "pid": "221107",
+      "pid_header": "704",
+      "expression": "B4",
+      "unit": "C",
+      "math": "-40",
+      "interval": 10000,
+      "class": "temperature",
+      "note": "Maximum battery temperature"
+    },
+    {
+      "name": "Battery Temp Min",
+      "pid": "221108",
+      "pid_header": "704",
+      "expression": "B4",
+      "unit": "C",
+      "math": "-40",
+      "interval": 60000,
+      "class": "temperature",
+      "note": "Minimum battery temperature"
+    },
+    {
+      "name": "Cumulative Charge",
+      "pid": "221120",
+      "pid_header": "704",
+      "expression": "B4*16777216+B5*65536+B6*256+B7",
+      "unit": "Ah",
+      "math": "",
+      "interval": 300000,
+      "class": "energy",
+      "note": "Total energy charged into battery (lifetime)"
+    },
+    {
+      "name": "Cumulative Discharge",
+      "pid": "221121",
+      "pid_header": "704",
+      "expression": "B4*16777216+B5*65536+B6*256+B7",
+      "unit": "Ah",
+      "math": "",
+      "interval": 300000,
+      "class": "energy",
+      "note": "Total energy discharged from battery (lifetime)"
+    },
+    {
+      "name": "CLTC Range",
+      "pid": "221118",
+      "pid_header": "704",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "km",
+      "math": "",
+      "interval": 60000,
+      "class": "distance",
+      "note": "China CLTC rated range (~15-20% higher than WLTP)"
+    },
+    {
+      "name": "BMS Charge Status",
+      "pid": "22112D",
+      "pid_header": "704",
+      "expression": "B4",
+      "unit": "",
+      "math": "",
+      "interval": 5000,
+      "class": "status",
+      "note": "0=Not charging, 2=DC charging, 3=AC charging"
+    },
+    {
+      "name": "Charge Limit",
+      "pid": "221130",
+      "pid_header": "704",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "%",
+      "math": "",
+      "interval": 60000,
+      "class": "battery",
+      "note": "User-set charge limit percentage"
+    },
+    {
+      "name": "Speed",
+      "pid": "220104",
+      "pid_header": "7E0",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "km/h",
+      "math": "/100",
+      "interval": 5000,
+      "class": "speed",
+      "note": "Vehicle speed"
+    },
+    {
+      "name": "Odometer",
+      "pid": "220101",
+      "pid_header": "7E0",
+      "expression": "twosComp(B5,8)*256+B6",
+      "unit": "km",
+      "math": "",
+      "interval": 300000,
+      "class": "distance",
+      "note": "Total distance traveled"
+    },
+    {
+      "name": "12V Battery",
+      "pid": "220102",
+      "pid_header": "7E0",
+      "expression": "B4",
+      "unit": "V",
+      "math": "/10",
+      "interval": 30000,
+      "class": "voltage",
+      "note": "12V auxiliary battery voltage"
+    },
+    {
+      "name": "Range Estimate",
+      "pid": "220313",
+      "pid_header": "7E0",
+      "expression": "B4",
+      "unit": "km",
+      "math": "",
+      "interval": 60000,
+      "class": "distance",
+      "note": "Vehicle estimated remaining range"
+    },
+    {
+      "name": "HV Power",
+      "pid": "22031A",
+      "pid_header": "7E0",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "kW",
+      "math": "-2000)/10",
+      "interval": 5000,
+      "class": "power",
+      "note": "HV battery power - Positive=Discharge, Negative=Charge"
+    },
+    {
+      "name": "Motor RPM",
+      "pid": "220317",
+      "pid_header": "7E0",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "RPM",
+      "math": "",
+      "interval": 10000,
+      "class": "rpm",
+      "note": "Electric motor rotational speed"
+    },
+    {
+      "name": "Motor Torque",
+      "pid": "220319",
+      "pid_header": "7E0",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "Nm",
+      "math": "-2000)/10",
+      "interval": 10000,
+      "class": "torque",
+      "note": "Motor torque output"
+    },
+    {
+      "name": "Charging Flag",
+      "pid": "22031D",
+      "pid_header": "7E0",
+      "expression": "B4",
+      "unit": "",
+      "math": "",
+      "interval": 5000,
+      "class": "status",
+      "note": "VCU charging status - 0=No, 1=Yes"
+    },
+    {
+      "name": "DC Charge Status",
+      "pid": "22031E",
+      "pid_header": "7E0",
+      "expression": "B4",
+      "unit": "",
+      "math": "",
+      "interval": 5000,
+      "class": "status",
+      "note": "0=Unplugged, 1=Init, 2=Charging, 3=Complete, 4=Stopped"
+    },
+    {
+      "name": "DC Charge Current",
+      "pid": "22031F",
+      "pid_header": "7E0",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "A",
+      "math": "/10-1200",
+      "interval": 5000,
+      "class": "current",
+      "note": "DC fast charge current (CCS/GB/T)"
+    },
+    {
+      "name": "DC Charge Voltage",
+      "pid": "220320",
+      "pid_header": "7E0",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "V",
+      "math": "",
+      "interval": 5000,
+      "class": "voltage",
+      "note": "DC fast charge voltage"
+    },
+    {
+      "name": "AC Charge Current",
+      "pid": "220321",
+      "pid_header": "7E0",
+      "expression": "twosComp(B4,8)*256+B5",
+      "unit": "A",
+      "math": "*2",
+      "interval": 5000,
+      "class": "current",
+      "note": "AC charge current (Type 2 / home charging)"
+    },
+    {
+      "name": "AC Charge Voltage",
+      "pid": "220322",
+      "pid_header": "7E0",
+      "expression": "B4",
+      "unit": "V",
+      "math": "*3",
+      "interval": 5000,
+      "class": "voltage",
+      "note": "AC charge voltage"
+    },
+    {
+      "name": "Inverter Temp",
+      "pid": "220325",
+      "pid_header": "7E0",
+      "expression": "B4",
+      "unit": "C",
+      "math": "/2-40",
+      "interval": 30000,
+      "class": "temperature",
+      "note": "Inverter temperature"
+    },
+    {
+      "name": "Motor Coolant Temp",
+      "pid": "220327",
+      "pid_header": "7E0",
+      "expression": "B4",
+      "unit": "C",
+      "math": "/2-40",
+      "interval": 30000,
+      "class": "temperature",
+      "note": "Motor/drivetrain coolant temperature"
+    },
+    {
+      "name": "Battery Coolant Temp",
+      "pid": "220328",
+      "pid_header": "7E0",
+      "expression": "B4",
+      "unit": "C",
+      "math": "/2-40",
+      "interval": 30000,
+      "class": "temperature",
+      "note": "Battery pack coolant temperature"
+    }
+  ],
+  "mqtt": {
+    "discovery_prefix": "homeassistant",
+    "device_name": "XPENG G6",
+    "device_id": "xpeng_g6"
+  },
+  "notes": {
+    "protocol": "ISO 15765-4 CAN (11-bit ID, 500 kbaud) - Protocol 6",
+    "ecu_bms": "Header 704, Response 784 - Battery Management System (PIDs 2211xx)",
+    "ecu_vcu": "Header 7E0, Response 7E8 - Vehicle Control Unit (PIDs 2201xx, 2203xx)",
+    "current_convention": "NEGATIVE current = charging, POSITIVE = discharging",
+    "power_convention": "POSITIVE power = discharging, NEGATIVE = charging/regen",
+    "charging_detection": "Use HV Current < -0.5A AND Speed = 0 to detect charging",
+    "verified_on": "XPENG G6 2023-2024 models"
+  }
+}
