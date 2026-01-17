@@ -1,0 +1,61 @@
+{
+  "car_model": "XPENG: G6 (VCU)",
+  "init": "ATSP6;ATSH7E0;ATCRA7E8;ATFCSH7E0;ATFCSM1;",
+  "pids": [
+    {
+      "pid": "220104",
+      "parameters": {
+        "SPEED": "[B4:B5]/100"
+      }
+    },
+    {
+      "pid": "220101",
+      "parameters": {
+        "ODOMETER": "[B5:B6]"
+      }
+    },
+    {
+      "pid": "220102",
+      "parameters": {
+        "AUX_BATT_V": "B4/10"
+      }
+    },
+    {
+      "pid": "220313",
+      "parameters": {
+        "RANGE": "B4"
+      }
+    },
+    {
+      "pid": "22031A",
+      "parameters": {
+        "HV_W": "([B4:B5]-20000)/10*1000"
+      }
+    },
+    {
+      "pid": "22031D",
+      "parameters": {
+        "CHARGER_CONNECTED": "B4"
+      }
+    },
+    {
+      "pid": "220325",
+      "parameters": {
+        "INV_TEMP": "B4/2-40"
+      }
+    },
+    {
+      "pid": "220327",
+      "parameters": {
+        "MOTOR_TEMP": "B4/2-40"
+      }
+    },
+    {
+      "pid": "220328",
+      "parameters": {
+        "COOLANT_TMP": "B4/2-40"
+      }
+    }
+  ],
+  "_comment": "VCU ECU (Header 7E0) PIDs. See wican_xpeng_g6_profile.json for BMS PIDs (Header 704)"
+}
