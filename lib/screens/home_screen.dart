@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show SystemNavigator;
+import 'package:flutter/services.dart' show SystemNavigator, MethodChannel;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/vehicle_data_provider.dart';
 import '../providers/mqtt_provider.dart';
@@ -27,6 +27,8 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObserver {
+  static const _lifecycleChannel = MethodChannel('com.example.carsoc/app_lifecycle');
+
   bool _isVpnActive = false;
   bool _isInternetConnected = false;
   StreamSubscription<bool>? _vpnStatusSubscription;
@@ -134,6 +136,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
     super.dispose();
   }
 
+  /// Minimize the app to background (keeps services running)
+  Future<void> _minimizeApp() async {
+    try {
+      await _lifecycleChannel.invokeMethod('moveToBackground');
+    } catch (e) {
+      debugPrint('Failed to minimize app: $e');
+    }
+  }
+
   /// Exit the app with proper cleanup
   Future<void> _exitApp() async {
     final confirmed = await showDialog<bool>(
@@ -226,6 +237,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
               );
             },
             tooltip: 'Settings',
+          ),
+          IconButton(
+            icon: const Icon(Icons.minimize),
+            onPressed: _minimizeApp,
+            tooltip: 'Minimize',
           ),
           IconButton(
             icon: const Icon(Icons.power_settings_new),

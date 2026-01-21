@@ -22,6 +22,13 @@ class MainActivity : FlutterActivity() {
     private lateinit var bluetoothHelper: BluetoothHelper
     private lateinit var locationHelper: LocationHelper
     private var shouldMinimiseOnStart = false
+    private var stayInBackground = false
+    private var wasInBackground = false
+
+    companion object {
+        private const val PREFS_NAME = "FlutterSharedPreferences"
+        private const val STAY_IN_BACKGROUND_KEY = "flutter.stay_in_background"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,6 +44,24 @@ class MainActivity : FlutterActivity() {
         if (shouldMinimiseOnStart) {
             android.util.Log.d("MainActivity", "App started with start_minimised flag, will minimize after Flutter init")
         }
+
+        // Load "stay in background" preference
+        loadStayInBackgroundPreference()
+    }
+
+    private fun loadStayInBackgroundPreference() {
+        try {
+            val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            stayInBackground = prefs.getBoolean(STAY_IN_BACKGROUND_KEY, false)
+            android.util.Log.d("MainActivity", "Stay in background: $stayInBackground")
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Failed to load stay_in_background: ${e.message}")
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        wasInBackground = true
     }
 
     override fun onPostResume() {
@@ -50,6 +75,18 @@ class MainActivity : FlutterActivity() {
                 moveTaskToBack(true)
             }, 500)
         }
+        // If "stay in background" is enabled and we were in background, move back
+        else if (stayInBackground && wasInBackground) {
+            android.util.Log.d("MainActivity", "Stay in background enabled, returning to background")
+            // Reload preference in case it was changed
+            loadStayInBackgroundPreference()
+            if (stayInBackground) {
+                window.decorView.postDelayed({
+                    moveTaskToBack(true)
+                }, 100)
+            }
+        }
+        wasInBackground = false
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

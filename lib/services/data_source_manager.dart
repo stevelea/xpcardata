@@ -17,6 +17,7 @@ import 'fleet_analytics_service.dart';
 import 'mock_data_service.dart';
 import 'debug_logger.dart';
 import 'hive_storage_service.dart';
+import 'keep_alive_service.dart';
 
 /// Data source types available
 enum DataSource {
@@ -258,6 +259,8 @@ class DataSourceManager {
     _publishToFleetAnalytics(enrichedData);
     _sendToAndroidAuto(enrichedData);
     _processChargingData(enrichedData);
+    // Pulse keep-alive to prove app is active
+    KeepAliveService.instance.pulse();
   }
 
   /// Activate proxy data source
@@ -440,6 +443,8 @@ class DataSourceManager {
         _sendToAndroidAuto(enrichedData);
         _processChargingData(enrichedData);
         _checkAuxBatteryProtection(enrichedData);
+        // Pulse keep-alive to prove app is active
+        KeepAliveService.instance.pulse();
       },
       onError: (error) {
         _logger.log('[DataSourceManager] OBD-II error: $error');

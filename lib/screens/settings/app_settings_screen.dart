@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../providers/vehicle_data_provider.dart';
 import '../../services/github_update_service.dart' show GitHubUpdateService, appVersion;
 import '../../services/background_service.dart';
+import '../../services/keep_alive_service.dart';
 import '../../services/theme_service.dart';
 import '../../theme/app_themes.dart';
 import '../../services/open_charge_map_service.dart';
@@ -24,6 +25,8 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
   // App Behavior
   int _updateFrequencySeconds = 2;
   bool _startMinimised = false;
+  bool _stayInBackground = false;
+  bool _keepAliveEnabled = false;
   bool _backgroundServiceEnabled = false;
   bool _backgroundServiceAvailable = false;
 
@@ -103,6 +106,8 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
       setState(() {
         _updateFrequencySeconds = hive.getSetting<int>('update_frequency_seconds') ?? 2;
         _startMinimised = hive.getSetting<bool>('start_minimised') ?? false;
+        _stayInBackground = hive.getSetting<bool>('stay_in_background') ?? false;
+        _keepAliveEnabled = hive.getSetting<bool>('keep_alive_enabled') ?? false;
         _backgroundServiceEnabled = hive.getSetting<bool>('background_service_enabled') ?? false;
         _lowBatteryThreshold = hive.getSetting<double>('alert_low_battery') ?? 20.0;
         _criticalBatteryThreshold = hive.getSetting<double>('alert_critical_battery') ?? 10.0;
@@ -120,6 +125,8 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
       setState(() {
         _updateFrequencySeconds = prefs.getInt('update_frequency_seconds') ?? 2;
         _startMinimised = prefs.getBool('start_minimised') ?? false;
+        _stayInBackground = prefs.getBool('stay_in_background') ?? false;
+        _keepAliveEnabled = prefs.getBool('keep_alive_enabled') ?? false;
         _backgroundServiceEnabled = prefs.getBool('background_service_enabled') ?? false;
         _lowBatteryThreshold = prefs.getDouble('alert_low_battery') ?? 20.0;
         _criticalBatteryThreshold = prefs.getDouble('alert_critical_battery') ?? 10.0;
@@ -572,6 +579,17 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
                   ),
                   const Divider(),
                   SwitchListTile(
+                    title: const Text('Stay in Background'),
+                    subtitle: const Text('Prevent app from stealing focus from navigation'),
+                    value: _stayInBackground,
+                    onChanged: (value) {
+                      setState(() => _stayInBackground = value);
+                      _autoSaveBool('stay_in_background', value);
+                    },
+                    secondary: const Icon(Icons.do_not_disturb),
+                  ),
+                  const Divider(),
+                  SwitchListTile(
                     title: const Text('Run in Background'),
                     subtitle: Text(_backgroundServiceAvailable
                         ? 'Keep collecting data when app is minimised'
@@ -641,6 +659,28 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
                       }
                     },
                     secondary: const Icon(Icons.sync),
+                  ),
+                  const Divider(),
+                  SwitchListTile(
+                    title: const Text('Keep Alive (Wakelock)'),
+                    subtitle: const Text('Prevent Android from killing the app'),
+                    value: _keepAliveEnabled,
+                    onChanged: (value) async {
+                      setState(() => _keepAliveEnabled = value);
+                      _autoSaveBool('keep_alive_enabled', value);
+
+                      // Enable/disable the keep-alive service
+                      try {
+                        if (value) {
+                          await KeepAliveService.instance.enable();
+                        } else {
+                          await KeepAliveService.instance.disable();
+                        }
+                      } catch (e) {
+                        debugPrint('Keep-alive toggle error: $e');
+                      }
+                    },
+                    secondary: const Icon(Icons.lock_clock),
                   ),
                 ],
               ),

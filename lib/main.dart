@@ -18,6 +18,7 @@ import 'services/theme_service.dart';
 import 'services/open_charge_map_service.dart';
 import 'services/mock_data_service.dart';
 import 'services/healthcheck_service.dart';
+import 'services/keep_alive_service.dart';
 import 'providers/vehicle_data_provider.dart';
 import 'providers/mqtt_provider.dart';
 import 'screens/home_screen.dart';
@@ -102,6 +103,14 @@ void main() async {
   } catch (e) {
     print('Background service initialization failed: $e');
     print('App will continue without background service');
+  }
+
+  // Initialize keep-alive service (wakelock + heartbeat monitoring)
+  try {
+    await KeepAliveService.instance.initialize();
+    print('KeepAliveService initialized: enabled=${KeepAliveService.instance.isEnabled}');
+  } catch (e) {
+    print('KeepAliveService initialization failed: $e');
   }
 
   runApp(
