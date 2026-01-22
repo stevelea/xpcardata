@@ -100,6 +100,12 @@
             android:exported="false"
             tools:replace="android:exported" />
 
+        <!-- Native keep-alive service for AI boxes where Flutter plugins fail -->
+        <service
+            android:name=".KeepAliveService"
+            android:foregroundServiceType="connectedDevice"
+            android:exported="false" />
+
         <!-- FileProvider for APK installation -->
         <provider
             android:name="androidx.core.content.FileProvider"

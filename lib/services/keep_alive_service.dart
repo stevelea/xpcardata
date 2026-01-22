@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'debug_logger.dart';
 import 'hive_storage_service.dart';
@@ -11,9 +11,11 @@ class KeepAliveService {
   KeepAliveService._internal();
 
   final _logger = DebugLogger.instance;
+  static const _keepAliveChannel = MethodChannel('com.example.carsoc/keep_alive');
 
   bool _isEnabled = false;
   bool _wakelockEnabled = false;
+  bool _nativeServiceRunning = false;  // Track native service state
   Timer? _heartbeatTimer;
   DateTime? _lastHeartbeat;
 
@@ -49,18 +51,30 @@ class KeepAliveService {
 
   /// Enable keep-alive (wakelock + heartbeat monitoring)
   Future<void> enable() async {
-    if (_isEnabled && _wakelockEnabled) return;
+    if (_isEnabled && (_wakelockEnabled || _nativeServiceRunning)) return;
 
     _isEnabled = true;
 
-    // Enable wakelock to prevent CPU sleep
+    // Try Flutter wakelock first
     try {
       await WakelockPlus.enable();
       _wakelockEnabled = await WakelockPlus.enabled;
       _logger.log('[KeepAlive] Wakelock enabled: $_wakelockEnabled');
     } catch (e) {
-      _logger.log('[KeepAlive] Failed to enable wakelock: $e');
+      _logger.log('[KeepAlive] Flutter wakelock failed: $e');
       _wakelockEnabled = false;
+    }
+
+    // If Flutter wakelock failed, use native foreground service (AI box fallback)
+    if (!_wakelockEnabled) {
+      try {
+        await _keepAliveChannel.invokeMethod('startService');
+        _nativeServiceRunning = true;
+        _logger.log('[KeepAlive] Native foreground service started (fallback)');
+      } catch (e) {
+        _logger.log('[KeepAlive] Native service also failed: $e');
+        _nativeServiceRunning = false;
+      }
     }
 
     // Start heartbeat timer to detect if app is being throttled
@@ -72,7 +86,7 @@ class KeepAliveService {
       await hive.saveSetting('keep_alive_enabled', true);
     }
 
-    _logger.log('[KeepAlive] Enabled');
+    _logger.log('[KeepAlive] Enabled (wakelock=$_wakelockEnabled, native=$_nativeServiceRunning)');
   }
 
   /// Disable keep-alive
@@ -86,6 +100,17 @@ class KeepAliveService {
       _logger.log('[KeepAlive] Wakelock disabled');
     } catch (e) {
       _logger.log('[KeepAlive] Failed to disable wakelock: $e');
+    }
+
+    // Stop native service if running
+    if (_nativeServiceRunning) {
+      try {
+        await _keepAliveChannel.invokeMethod('stopService');
+        _nativeServiceRunning = false;
+        _logger.log('[KeepAlive] Native service stopped');
+      } catch (e) {
+        _logger.log('[KeepAlive] Failed to stop native service: $e');
+      }
     }
 
     // Stop heartbeat
@@ -161,12 +186,25 @@ class KeepAliveService {
   }
 
   Future<void> _reacquireWakelock() async {
+    // Try Flutter wakelock first
     try {
       await WakelockPlus.enable();
       _wakelockEnabled = await WakelockPlus.enabled;
       _logger.log('[KeepAlive] Wakelock re-acquired: $_wakelockEnabled');
     } catch (e) {
       _logger.log('[KeepAlive] Failed to re-acquire wakelock: $e');
+      _wakelockEnabled = false;
+    }
+
+    // If wakelock failed, ensure native service is running
+    if (!_wakelockEnabled && !_nativeServiceRunning) {
+      try {
+        await _keepAliveChannel.invokeMethod('startService');
+        _nativeServiceRunning = true;
+        _logger.log('[KeepAlive] Native service started as fallback');
+      } catch (e) {
+        _logger.log('[KeepAlive] Native service fallback failed: $e');
+      }
     }
   }
 
@@ -175,11 +213,15 @@ class KeepAliveService {
     _lastHeartbeat = DateTime.now();
   }
 
+  /// Whether native service is running
+  bool get isNativeServiceRunning => _nativeServiceRunning;
+
   /// Get status info for debugging
   Map<String, dynamic> getStatus() {
     return {
       'enabled': _isEnabled,
       'wakelockHeld': _wakelockEnabled,
+      'nativeServiceRunning': _nativeServiceRunning,
       'lastHeartbeat': _lastHeartbeat?.toIso8601String(),
       'timeSinceHeartbeat': timeSinceLastHeartbeat?.inSeconds,
     };

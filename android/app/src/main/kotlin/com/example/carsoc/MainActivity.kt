@@ -19,6 +19,7 @@ class MainActivity : FlutterActivity() {
     private val UPDATE_CHANNEL = "com.example.carsoc/update"
     private val LOCATION_CHANNEL = "com.example.carsoc/location"
     private val APP_LIFECYCLE_CHANNEL = "com.example.carsoc/app_lifecycle"
+    private val KEEP_ALIVE_CHANNEL = "com.example.carsoc/keep_alive"
     private lateinit var bluetoothHelper: BluetoothHelper
     private lateinit var locationHelper: LocationHelper
     private var shouldMinimiseOnStart = false
@@ -367,6 +368,43 @@ class MainActivity : FlutterActivity() {
                     // Check if app was launched via boot receiver with start_minimised flag
                     val wasMinimised = intent?.getBooleanExtra("start_minimised", false) ?: false
                     result.success(wasMinimised)
+                }
+                else -> {
+                    result.notImplemented()
+                }
+            }
+        }
+
+        // Set up Keep Alive method channel (native foreground service for AI boxes)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, KEEP_ALIVE_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startService" -> {
+                    try {
+                        KeepAliveService.start(applicationContext)
+                        android.util.Log.d("KeepAlive", "Native keep-alive service started")
+                        result.success(true)
+                    } catch (e: Exception) {
+                        android.util.Log.e("KeepAlive", "Failed to start service: ${e.message}")
+                        result.error("START_FAILED", e.message, null)
+                    }
+                }
+                "stopService" -> {
+                    try {
+                        KeepAliveService.stop(applicationContext)
+                        android.util.Log.d("KeepAlive", "Native keep-alive service stopped")
+                        result.success(true)
+                    } catch (e: Exception) {
+                        android.util.Log.e("KeepAlive", "Failed to stop service: ${e.message}")
+                        result.error("STOP_FAILED", e.message, null)
+                    }
+                }
+                "isServiceRunning" -> {
+                    try {
+                        val running = KeepAliveService.isServiceRunning()
+                        result.success(running)
+                    } catch (e: Exception) {
+                        result.error("CHECK_FAILED", e.message, null)
+                    }
                 }
                 else -> {
                     result.notImplemented()

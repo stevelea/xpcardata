@@ -42,6 +42,11 @@ class OBDService {
   static const int _lowPriorityInterval = 60; // Poll low priority every 60 cycles (5 sec * 60 = 5 minutes)
   final Map<String, double> _lastLowPriorityValues = {}; // Cache last values for low priority PIDs
 
+  // ECU wake-up tracking: retry on first poll if we get all 7F errors
+  bool _ecuWakeupAttempted = false;
+  int _consecutive7FErrorCount = 0;
+  static const int _max7FErrorsBeforeRetry = 5;
+
   Stream<VehicleData> get vehicleDataStream => _dataController.stream;
   bool get isConnected => _isConnected;
   String? get connectedDevice => _connectedDeviceAddress;
@@ -698,9 +703,40 @@ class OBDService {
       _logger.log('[OBDService] Protocol: $protocol');
 
       _logger.log('[OBDService] ELM327 initialized');
+
+      // Reset ECU wake-up tracking for new connection
+      _ecuWakeupAttempted = false;
+      _consecutive7FErrorCount = 0;
     } catch (e) {
       _logger.log('[OBDService] ELM327 initialization error: $e');
       throw Exception('Failed to initialize ELM327: $e');
+    }
+  }
+
+  /// Wake up ECUs by sending a few requests to trigger the vehicle's
+  /// communication modules. Some vehicles (like XPENG G6) need this
+  /// before they respond properly to data requests.
+  Future<void> _wakeUpECUs() async {
+    _logger.log('[OBDService] Waking up ECUs...');
+
+    try {
+      // Send a simple request to each ECU to wake them up
+      // BMS ECU (704/784)
+      await _sendCommand('ATSH704');
+      await Future.delayed(const Duration(milliseconds: 100));
+      await _sendCommand('221109'); // SOC request to wake BMS
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // VCU ECU (7E0/7E8)
+      await _sendCommand('ATSH7E0');
+      await Future.delayed(const Duration(milliseconds: 100));
+      await _sendCommand('220104'); // Speed request to wake VCU
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      _logger.log('[OBDService] ECU wake-up sequence complete');
+      _ecuWakeupAttempted = true;
+    } catch (e) {
+      _logger.log('[OBDService] ECU wake-up error: $e');
     }
   }
 
@@ -857,6 +893,9 @@ class OBDService {
         _logger.log('[OBDService] Poll cycle $_pollCycleCount: polling HIGH priority PIDs only');
       }
 
+      // Reset 7F error counter at start of each poll cycle
+      _consecutive7FErrorCount = 0;
+
       // Use class field to track actual ELM327 header state across poll cycles
       // This persists across polls so we know the real adapter state
 
@@ -911,6 +950,7 @@ class OBDService {
           // Skip if value is NaN (indicates error/unsupported PID)
           if (value.isNaN) {
             _logger.log('[OBDService] ${pidConfig.name}: skipped (error response)');
+            _consecutive7FErrorCount++;
             continue;
           }
 
@@ -992,6 +1032,19 @@ class OBDService {
       if (batteryVoltage != null && batteryCurrent != null) {
         power = (batteryVoltage * batteryCurrent) / 1000; // kW
         _logger.log('[OBDService] Calculated Power: $power kW');
+      }
+
+      // Check if we got too many 7F errors on first few poll cycles (ECUs not awake)
+      // If we haven't attempted wake-up yet and got mostly errors, trigger wake-up
+      if (!_ecuWakeupAttempted &&
+          _pollCycleCount <= 3 &&
+          _consecutive7FErrorCount >= _max7FErrorsBeforeRetry) {
+        _logger.log(
+            '[OBDService] Too many 7F errors ($_consecutive7FErrorCount) on poll cycle $_pollCycleCount - ECUs may be asleep');
+        _logger.log('[OBDService] Triggering ECU wake-up sequence...');
+        await _wakeUpECUs();
+        // Reset header state after wake-up so next poll re-initializes properly
+        _currentEcuHeader = null;
       }
 
       return VehicleData(

@@ -171,7 +171,7 @@ class HiveStorageService {
     try {
       final box = Hive.box<Map>(_chargingSessionsBox);
       final sessions = box.values
-          .map((map) => ChargingSession.fromMap(Map<String, dynamic>.from(map)))
+          .map((map) => ChargingSession.fromMap(_deepConvertMap(map)))
           .toList();
 
       // Sort by start time descending (most recent first)
@@ -185,6 +185,34 @@ class HiveStorageService {
       _logger.log('[Hive] Failed to get sessions: $e');
       return [];
     }
+  }
+
+  /// Recursively convert a map with dynamic keys/values to Map<String, dynamic>
+  /// Hive stores nested maps as _Map<dynamic, dynamic> which causes cast errors
+  Map<String, dynamic> _deepConvertMap(Map map) {
+    return map.map((key, value) {
+      final stringKey = key.toString();
+      if (value is Map) {
+        return MapEntry(stringKey, _deepConvertMap(value));
+      } else if (value is List) {
+        return MapEntry(stringKey, _deepConvertList(value));
+      } else {
+        return MapEntry(stringKey, value);
+      }
+    });
+  }
+
+  /// Recursively convert list items that may contain maps
+  List _deepConvertList(List list) {
+    return list.map((item) {
+      if (item is Map) {
+        return _deepConvertMap(item);
+      } else if (item is List) {
+        return _deepConvertList(item);
+      } else {
+        return item;
+      }
+    }).toList();
   }
 
   /// Get the last completed charging session
@@ -210,7 +238,7 @@ class HiveStorageService {
       final box = Hive.box<Map>(_chargingSessionsBox);
       final map = box.get(id);
       if (map == null) return null;
-      return ChargingSession.fromMap(Map<String, dynamic>.from(map));
+      return ChargingSession.fromMap(_deepConvertMap(map));
     } catch (e) {
       _logger.log('[Hive] Failed to get session by ID: $e');
       return null;
