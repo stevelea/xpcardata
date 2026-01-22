@@ -72,14 +72,28 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
+    // Try Hive first (most reliable on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      final hiveModel = hive.getSetting<String>('vehicle_model');
+      if (hiveModel != null) {
+        setState(() {
+          _vehicleModel = hiveModel;
+        });
+        debugPrint('[VehicleSettings] Loaded vehicle_model from Hive: $hiveModel');
+        return;
+      }
+    }
+
+    // Fallback to SharedPreferences
     try {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
         _vehicleModel = prefs.getString('vehicle_model') ?? '24LR';
-        // Location is loaded via _getLocationEnabled() from Hive/DataSourceManager
       });
+      debugPrint('[VehicleSettings] Loaded vehicle_model from SharedPreferences: $_vehicleModel');
     } catch (e) {
-      debugPrint('Failed to load settings: $e');
+      debugPrint('[VehicleSettings] Failed to load settings: $e');
     }
   }
 
@@ -105,11 +119,20 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
   }
 
   Future<void> _autoSaveString(String key, String value) async {
+    // Save to Hive first (most reliable on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      await hive.saveSetting(key, value);
+      debugPrint('[VehicleSettings] Saved $key to Hive: $value');
+    }
+
+    // Also save to SharedPreferences as backup
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(key, value);
+      debugPrint('[VehicleSettings] Saved $key to SharedPreferences: $value');
     } catch (e) {
-      debugPrint('Failed to save $key: $e');
+      debugPrint('[VehicleSettings] SharedPreferences save failed for $key: $e');
     }
   }
 

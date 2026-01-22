@@ -282,11 +282,25 @@ class BackupService {
     }
   }
 
-  /// Collect settings from SharedPreferences and file storage
+  /// Collect settings from Hive, SharedPreferences and file storage
   Future<Map<String, dynamic>> _collectSettings() async {
     final settings = <String, dynamic>{};
 
-    // Try SharedPreferences first
+    // Try Hive first (most reliable on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      try {
+        final hiveSettings = hive.getAllSettings();
+        for (final entry in hiveSettings.entries) {
+          settings[entry.key] = entry.value;
+        }
+        debugPrint('[Backup] Collected ${hiveSettings.length} settings from Hive');
+      } catch (e) {
+        debugPrint('[Backup] Failed to read Hive settings: $e');
+      }
+    }
+
+    // Also get from SharedPreferences (may have additional settings)
     try {
       final prefs = await SharedPreferences.getInstance();
 
@@ -316,6 +330,8 @@ class BackupService {
       settings['data_retention_days'] = prefs.getInt('data_retention_days');
       settings['update_frequency_seconds'] = prefs.getInt('update_frequency_seconds');
       settings['start_minimised'] = prefs.getBool('start_minimised');
+      settings['stay_in_background'] = prefs.getBool('stay_in_background');
+      settings['keep_alive_enabled'] = prefs.getBool('keep_alive_enabled');
       settings['background_service_enabled'] = prefs.getBool('background_service_enabled');
 
       // Vehicle & Location
@@ -460,11 +476,22 @@ class BackupService {
     return sessions;
   }
 
-  /// Restore settings to SharedPreferences and file
+  /// Restore settings to Hive, SharedPreferences and file
   Future<void> _restoreSettings(Map<String, dynamic> settings) async {
     debugPrint('[Backup] Restoring ${settings.length} settings');
 
-    // Save to SharedPreferences
+    // Save to Hive first (most reliable on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      try {
+        await hive.saveAllSettings(settings);
+        debugPrint('[Backup] Settings restored to Hive');
+      } catch (e) {
+        debugPrint('[Backup] Failed to restore to Hive: $e');
+      }
+    }
+
+    // Also save to SharedPreferences
     try {
       final prefs = await SharedPreferences.getInstance();
 
@@ -484,6 +511,7 @@ class BackupService {
           await prefs.setBool(key, value);
         }
       }
+      debugPrint('[Backup] Settings restored to SharedPreferences');
     } catch (e) {
       debugPrint('[Backup] Failed to restore to SharedPreferences: $e');
     }

@@ -334,6 +334,42 @@ class HiveStorageService {
     }
   }
 
+  /// Get all settings as a map
+  Map<String, dynamic> getAllSettings() {
+    if (!isAvailable) return {};
+
+    try {
+      final box = Hive.box(_settingsBox);
+      final settings = <String, dynamic>{};
+      for (final key in box.keys) {
+        if (key is String) {
+          settings[key] = box.get(key);
+        }
+      }
+      return settings;
+    } catch (e) {
+      _logger.log('[Hive] Failed to get all settings: $e');
+      return {};
+    }
+  }
+
+  /// Save multiple settings at once
+  Future<void> saveAllSettings(Map<String, dynamic> settings) async {
+    if (!isAvailable) return;
+
+    try {
+      final box = Hive.box(_settingsBox);
+      for (final entry in settings.entries) {
+        if (entry.value != null) {
+          await box.put(entry.key, entry.value);
+        }
+      }
+      _logger.log('[Hive] Saved ${settings.length} settings');
+    } catch (e) {
+      _logger.log('[Hive] Failed to save all settings: $e');
+    }
+  }
+
   // ==================== Maintenance ====================
 
   /// Close all Hive boxes

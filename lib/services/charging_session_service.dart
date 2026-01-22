@@ -292,15 +292,26 @@ class ChargingSessionService {
   Future<double> _getBatteryCapacityKwh() async {
     if (_batteryCapacityKwh != null) return _batteryCapacityKwh!;
 
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final vehicleModel = prefs.getString('vehicle_model') ?? '24LR';
-      _batteryCapacityKwh = vehicleBatteryCapacities[vehicleModel] ?? 87.5;
-      _logger.log('[Charging] Battery capacity for $vehicleModel: $_batteryCapacityKwh kWh');
-    } catch (e) {
-      _batteryCapacityKwh = 87.5; // Default to G6 Long Range
-      _logger.log('[Charging] Failed to load battery capacity, using default: $_batteryCapacityKwh kWh');
+    String vehicleModel = '24LR';
+
+    // Try Hive first (most reliable on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      vehicleModel = hive.getSetting<String>('vehicle_model') ?? vehicleModel;
+      _logger.log('[Charging] Loaded vehicle_model from Hive: $vehicleModel');
+    } else {
+      // Fallback to SharedPreferences
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        vehicleModel = prefs.getString('vehicle_model') ?? vehicleModel;
+        _logger.log('[Charging] Loaded vehicle_model from SharedPreferences: $vehicleModel');
+      } catch (e) {
+        _logger.log('[Charging] Failed to load vehicle_model: $e');
+      }
     }
+
+    _batteryCapacityKwh = vehicleBatteryCapacities[vehicleModel] ?? 87.5;
+    _logger.log('[Charging] Battery capacity for $vehicleModel: $_batteryCapacityKwh kWh');
     return _batteryCapacityKwh!;
   }
 
