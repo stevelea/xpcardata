@@ -304,6 +304,7 @@ class ServiceStatusIndicator extends StatelessWidget {
   final bool isActive;
   final Color activeColor;
   final bool showLabel;
+  final bool hasError;
 
   const ServiceStatusIndicator({
     super.key,
@@ -312,29 +313,51 @@ class ServiceStatusIndicator extends StatelessWidget {
     required this.isActive,
     required this.activeColor,
     this.showLabel = true,
+    this.hasError = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = isActive ? activeColor : Colors.grey[400];
+    // Error state takes priority - show red/flashing when active but failing
+    final Color effectiveColor;
+    final String statusMessage;
+    final Color bgColor;
+    final Color borderColor;
+
+    if (hasError && isActive) {
+      // Connected but heartbeat failing - show warning state
+      effectiveColor = Colors.red;
+      statusMessage = '$label: Error';
+      bgColor = Colors.red.withAlpha(25);
+      borderColor = Colors.red;
+    } else if (isActive) {
+      effectiveColor = activeColor;
+      statusMessage = '$label: Connected';
+      bgColor = Colors.white;
+      borderColor = activeColor;
+    } else {
+      effectiveColor = Colors.grey[400]!;
+      statusMessage = '$label: Disconnected';
+      bgColor = Colors.grey[100]!;
+      borderColor = Colors.grey.withAlpha(77);
+    }
 
     return Tooltip(
-      message: '$label: ${isActive ? "Connected" : "Disconnected"}',
+      message: statusMessage,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          // Use white/light background for all states, with colored border when active
-          color: isActive ? Colors.white : Colors.grey[100],
+          color: bgColor,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: isActive ? activeColor : Colors.grey.withAlpha(77),
-            width: isActive ? 1.5 : 1.0,
+            color: borderColor,
+            width: (isActive || hasError) ? 1.5 : 1.0,
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 16, color: color),
+            Icon(icon, size: 16, color: effectiveColor),
             if (showLabel) ...[
               const SizedBox(width: 4),
               Text(
@@ -342,7 +365,7 @@ class ServiceStatusIndicator extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
-                  color: color,
+                  color: effectiveColor,
                 ),
               ),
             ],

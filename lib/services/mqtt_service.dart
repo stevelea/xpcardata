@@ -40,6 +40,14 @@ class MqttService {
   Timer? _periodicReconnectTimer;
   int _periodicReconnectIntervalSeconds = 0; // 0 = disabled
 
+  // Heartbeat state
+  Timer? _heartbeatTimer;
+  static const int _heartbeatIntervalSeconds = 60; // Send heartbeat every 60 seconds
+  DateTime? _lastSuccessfulPublish;
+  bool _lastHeartbeatFailed = false;
+  final StreamController<bool> _heartbeatStatusController =
+      StreamController<bool>.broadcast();
+
   /// Get Home Assistant discovery enabled state
   bool get haDiscoveryEnabled => _haDiscoveryEnabled;
 
@@ -53,6 +61,18 @@ class MqttService {
 
   Stream<MqttConnectionState> get connectionStateStream =>
       _connectionStateController.stream;
+
+  /// Stream that emits true when heartbeat succeeds, false when it fails
+  Stream<bool> get heartbeatStatusStream => _heartbeatStatusController.stream;
+
+  /// Whether the last heartbeat failed
+  bool get lastHeartbeatFailed => _lastHeartbeatFailed;
+
+  /// Time since last successful publish
+  Duration? get timeSinceLastPublish {
+    if (_lastSuccessfulPublish == null) return null;
+    return DateTime.now().difference(_lastSuccessfulPublish!);
+  }
 
   bool get isConnected =>
       _client?.connectionStatus?.state == MqttConnectionState.connected;
@@ -133,6 +153,7 @@ class MqttService {
       if (_client!.connectionStatus?.state == MqttConnectionState.connected) {
         _reconnectAttempts = 0;
         _publishOnlineStatus();
+        _startHeartbeat();
         return true;
       } else {
         _client!.disconnect();
@@ -150,6 +171,7 @@ class MqttService {
   void disconnect() {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _stopHeartbeat();
 
     if (_client != null && isConnected) {
       _publishOfflineStatus();
@@ -352,10 +374,58 @@ class MqttService {
       'timestamp': DateTime.now().toIso8601String(),
     });
     _publishMessage(topic, payload, MqttQos.atLeastOnce, retain: true);
+    _lastSuccessfulPublish = DateTime.now();
 
     // Publish HA discovery if enabled
     if (_haDiscoveryEnabled && !_discoveryPublished) {
       _publishHADiscovery();
+    }
+  }
+
+  /// Start periodic heartbeat timer
+  void _startHeartbeat() {
+    _stopHeartbeat();
+    _heartbeatTimer = Timer.periodic(
+      Duration(seconds: _heartbeatIntervalSeconds),
+      (_) => _sendHeartbeat(),
+    );
+  }
+
+  /// Stop heartbeat timer
+  void _stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+  }
+
+  /// Send a heartbeat message to verify connection is alive
+  void _sendHeartbeat() {
+    if (_vehicleId == null) return;
+
+    try {
+      if (!isConnected) {
+        _lastHeartbeatFailed = true;
+        _heartbeatStatusController.add(false);
+        return;
+      }
+
+      final topic = 'vehicles/$_vehicleId/status';
+      final payload = jsonEncode({
+        'status': 'online',
+        'timestamp': DateTime.now().toIso8601String(),
+        'heartbeat': true,
+      });
+
+      _publishMessage(topic, payload, MqttQos.atLeastOnce, retain: true);
+      _lastSuccessfulPublish = DateTime.now();
+
+      // If we were in failed state, notify recovery
+      if (_lastHeartbeatFailed) {
+        _lastHeartbeatFailed = false;
+        _heartbeatStatusController.add(true);
+      }
+    } catch (e) {
+      _lastHeartbeatFailed = true;
+      _heartbeatStatusController.add(false);
     }
   }
 

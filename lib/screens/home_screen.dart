@@ -31,8 +31,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
 
   bool _isVpnActive = false;
   bool _isInternetConnected = false;
+  bool _mqttHeartbeatFailed = false;
   StreamSubscription<bool>? _vpnStatusSubscription;
   StreamSubscription<bool>? _connectivitySubscription;
+  StreamSubscription<bool>? _mqttHeartbeatSubscription;
   StreamSubscription<ChargingSession>? _sessionSubscription;
   List<ChargingSession> _recentSessions = [];
   bool _isLoadingSessions = true;
@@ -84,6 +86,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
       }
     });
 
+    // Listen for MQTT heartbeat status changes
+    final mqttService = ref.read(mqttServiceProvider);
+    _mqttHeartbeatSubscription = mqttService.heartbeatStatusStream.listen((success) {
+      if (mounted) {
+        setState(() {
+          _mqttHeartbeatFailed = !success;
+        });
+      }
+    });
+
     // Load recent charging sessions
     _loadRecentSessions();
 
@@ -130,6 +142,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
     WidgetsBinding.instance.removeObserver(this);
     _vpnStatusSubscription?.cancel();
     _connectivitySubscription?.cancel();
+    _mqttHeartbeatSubscription?.cancel();
     _sessionSubscription?.cancel();
     TailscaleService.instance.stopStatusMonitoring();
     ConnectivityService.instance.stopMonitoring();
@@ -1377,6 +1390,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
         label: 'MQTT',
         isActive: mqttService.isConnected,
         activeColor: Colors.blue,
+        hasError: _mqttHeartbeatFailed,
       ),
       ServiceStatusIndicator(
         icon: Icons.route,
