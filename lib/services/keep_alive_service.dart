@@ -55,7 +55,18 @@ class KeepAliveService {
 
     _isEnabled = true;
 
-    // Try Flutter wakelock first
+    // ALWAYS start native foreground service first - it's the most reliable
+    // method to keep the app alive, especially on AI boxes
+    try {
+      await _keepAliveChannel.invokeMethod('startService');
+      _nativeServiceRunning = true;
+      _logger.log('[KeepAlive] Native foreground service started');
+    } catch (e) {
+      _logger.log('[KeepAlive] Native service failed: $e');
+      _nativeServiceRunning = false;
+    }
+
+    // Also try Flutter wakelock as additional protection
     try {
       await WakelockPlus.enable();
       _wakelockEnabled = await WakelockPlus.enabled;
@@ -63,18 +74,6 @@ class KeepAliveService {
     } catch (e) {
       _logger.log('[KeepAlive] Flutter wakelock failed: $e');
       _wakelockEnabled = false;
-    }
-
-    // If Flutter wakelock failed, use native foreground service (AI box fallback)
-    if (!_wakelockEnabled) {
-      try {
-        await _keepAliveChannel.invokeMethod('startService');
-        _nativeServiceRunning = true;
-        _logger.log('[KeepAlive] Native foreground service started (fallback)');
-      } catch (e) {
-        _logger.log('[KeepAlive] Native service also failed: $e');
-        _nativeServiceRunning = false;
-      }
     }
 
     // Start heartbeat timer to detect if app is being throttled
@@ -86,7 +85,7 @@ class KeepAliveService {
       await hive.saveSetting('keep_alive_enabled', true);
     }
 
-    _logger.log('[KeepAlive] Enabled (wakelock=$_wakelockEnabled, native=$_nativeServiceRunning)');
+    _logger.log('[KeepAlive] Enabled (native=$_nativeServiceRunning, wakelock=$_wakelockEnabled)');
   }
 
   /// Disable keep-alive
@@ -186,7 +185,18 @@ class KeepAliveService {
   }
 
   Future<void> _reacquireWakelock() async {
-    // Try Flutter wakelock first
+    // Ensure native service is running first (most reliable)
+    if (!_nativeServiceRunning) {
+      try {
+        await _keepAliveChannel.invokeMethod('startService');
+        _nativeServiceRunning = true;
+        _logger.log('[KeepAlive] Native service re-started');
+      } catch (e) {
+        _logger.log('[KeepAlive] Native service restart failed: $e');
+      }
+    }
+
+    // Also try Flutter wakelock as additional protection
     try {
       await WakelockPlus.enable();
       _wakelockEnabled = await WakelockPlus.enabled;
@@ -194,17 +204,6 @@ class KeepAliveService {
     } catch (e) {
       _logger.log('[KeepAlive] Failed to re-acquire wakelock: $e');
       _wakelockEnabled = false;
-    }
-
-    // If wakelock failed, ensure native service is running
-    if (!_wakelockEnabled && !_nativeServiceRunning) {
-      try {
-        await _keepAliveChannel.invokeMethod('startService');
-        _nativeServiceRunning = true;
-        _logger.log('[KeepAlive] Native service started as fallback');
-      } catch (e) {
-        _logger.log('[KeepAlive] Native service fallback failed: $e');
-      }
     }
   }
 

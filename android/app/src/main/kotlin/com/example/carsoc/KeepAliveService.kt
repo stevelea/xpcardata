@@ -8,7 +8,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 
@@ -19,6 +21,7 @@ import androidx.core.app.NotificationCompat
  * This service:
  * - Runs as a foreground service with a persistent notification
  * - Holds a partial wake lock to prevent CPU sleep
+ * - Runs a periodic heartbeat to detect and recover from issues
  * - Works even when Flutter platform channels fail
  */
 class KeepAliveService : Service() {
@@ -27,6 +30,7 @@ class KeepAliveService : Service() {
         private const val CHANNEL_ID = "keep_alive_channel"
         private const val NOTIFICATION_ID = 1001
         private const val TAG = "KeepAliveService"
+        private const val HEARTBEAT_INTERVAL_MS = 30000L  // 30 seconds
 
         private var isRunning = false
 
@@ -54,6 +58,8 @@ class KeepAliveService : Service() {
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private var heartbeatRunnable: Runnable? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -71,6 +77,9 @@ class KeepAliveService : Service() {
         // Acquire wake lock
         acquireWakeLock()
 
+        // Start heartbeat to keep service alive and verify wake lock
+        startHeartbeat()
+
         // Return START_STICKY so Android restarts the service if it's killed
         return START_STICKY
     }
@@ -78,8 +87,34 @@ class KeepAliveService : Service() {
     override fun onDestroy() {
         android.util.Log.d(TAG, "Service onDestroy")
         isRunning = false
+        stopHeartbeat()
         releaseWakeLock()
+
+        // Schedule restart if the service was killed unexpectedly
+        // This helps recover from aggressive battery optimization
+        val restartIntent = Intent(applicationContext, KeepAliveService::class.java)
+        val pendingIntent = PendingIntent.getService(
+            applicationContext,
+            1,
+            restartIntent,
+            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+        alarmManager.set(
+            android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
+            android.os.SystemClock.elapsedRealtime() + 5000,
+            pendingIntent
+        )
+        android.util.Log.d(TAG, "Scheduled restart in 5 seconds")
+
         super.onDestroy()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        android.util.Log.d(TAG, "onTaskRemoved - app was swiped away")
+        // Don't stop the service when the app is swiped away
+        // The foreground notification will keep it running
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -150,5 +185,34 @@ class KeepAliveService : Service() {
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Failed to release wake lock: ${e.message}")
         }
+    }
+
+    private fun startHeartbeat() {
+        stopHeartbeat()
+
+        heartbeatRunnable = object : Runnable {
+            override fun run() {
+                if (!isRunning) return
+
+                // Check if wake lock is still held, re-acquire if needed
+                if (wakeLock == null || wakeLock?.isHeld != true) {
+                    android.util.Log.w(TAG, "Wake lock lost, re-acquiring")
+                    acquireWakeLock()
+                }
+
+                // Schedule next heartbeat
+                handler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
+            }
+        }
+
+        handler.post(heartbeatRunnable!!)
+        android.util.Log.d(TAG, "Heartbeat started (interval: ${HEARTBEAT_INTERVAL_MS}ms)")
+    }
+
+    private fun stopHeartbeat() {
+        heartbeatRunnable?.let {
+            handler.removeCallbacks(it)
+        }
+        heartbeatRunnable = null
     }
 }
