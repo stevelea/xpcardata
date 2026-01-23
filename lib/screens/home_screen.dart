@@ -658,16 +658,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
             : auxVoltage < 12.5
                 ? Colors.orange
                 : Colors.green;
-    // Build 12V battery subtitle showing source and BM300 SOC/temp if available
-    String? aux12VSubtitle;
-    if (bm300Voltage != null) {
-      final parts = <String>[];
-      if (bm300Soc != null) parts.add('$bm300Soc%');
-      if (bm300Temp != null) parts.add('$bm300Temp°C');
-      aux12VSubtitle = parts.isNotEmpty ? 'BM300: ${parts.join(' ')}' : 'BM300 Pro';
-    } else if (obdAuxVoltage != null) {
-      aux12VSubtitle = 'OBD-II';
-    }
+    // No longer need subtitle - we'll show both sources in the card
 
     final metrics = [
       // Guestimated Range moved from primary display (swapped with Speed)
@@ -692,13 +683,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
           isCompact: isCompact,
         ));
       }
-      // Special handling for 12V Battery to show source (BM300/OBD) and extra data
+      // Special handling for 12V Battery to show both sources (BM300/OBD)
       if (m.title == '12V Battery') {
         gridChildren.add(_build12VBatteryCard(
-          auxVoltageStr,
-          auxVoltageColor,
-          aux12VSubtitle,
-          isCompact,
+          bm300Voltage: bm300Voltage,
+          bm300Soc: bm300Soc,
+          bm300Temp: bm300Temp,
+          obdVoltage: obdAuxVoltage,
+          isCompact: isCompact,
         ));
       } else {
         gridChildren.add(MetricCard(
@@ -723,19 +715,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
     );
   }
 
-  /// Build 12V battery card with BM300 Pro or OBD-II data
-  Widget _build12VBatteryCard(
-    String voltageStr,
-    Color voltageColor,
-    String? subtitle,
-    bool isCompact,
-  ) {
+  /// Build 12V battery card with BM300 Pro and/or OBD-II data
+  Widget _build12VBatteryCard({
+    required double? bm300Voltage,
+    required int? bm300Soc,
+    required int? bm300Temp,
+    required double? obdVoltage,
+    required bool isCompact,
+  }) {
     final theme = Theme.of(context);
-    final titleSize = isCompact ? 12.0 : 14.0;
-    final valueSize = isCompact ? 20.0 : 24.0;
-    final unitSize = isCompact ? 12.0 : 14.0;
-    final iconSize = isCompact ? 18.0 : 22.0;
-    final padding = isCompact ? 12.0 : 16.0;
+    final titleSize = isCompact ? 13.0 : 15.0;
+    final valueSize = isCompact ? 28.0 : 34.0;  // Bigger text
+    final unitSize = isCompact ? 16.0 : 18.0;
+    final smallValueSize = isCompact ? 18.0 : 22.0;
+    final labelSize = isCompact ? 11.0 : 13.0;
+    final iconSize = isCompact ? 20.0 : 24.0;
+    final padding = isCompact ? 10.0 : 14.0;
+
+    // Determine which sources are available
+    final hasBm300 = bm300Voltage != null;
+    final hasObd = obdVoltage != null;
+
+    // Get voltage color based on value
+    Color getVoltageColor(double? voltage) {
+      if (voltage == null) return Colors.grey;
+      if (voltage < 11.8) return Colors.red;
+      if (voltage < 12.2) return Colors.orange;
+      return Colors.green;
+    }
+
+    final primaryVoltage = hasBm300 ? bm300Voltage : obdVoltage;
+    final primaryColor = getVoltageColor(primaryVoltage);
 
     return Card(
       elevation: 1,
@@ -748,61 +758,165 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Title row
             Row(
               children: [
                 Icon(
                   Icons.battery_full,
                   size: iconSize,
-                  color: voltageColor,
+                  color: primaryColor,
                 ),
                 const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    '12V Battery',
-                    style: TextStyle(
-                      fontSize: titleSize,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            const Spacer(),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
                 Text(
-                  voltageStr,
+                  '12V Battery',
                   style: TextStyle(
-                    fontSize: valueSize,
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.onSurface,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  'V',
-                  style: TextStyle(
-                    fontSize: unitSize,
+                    fontSize: titleSize,
+                    fontWeight: FontWeight.w500,
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],
             ),
-            // Show source subtitle (BM300 with SOC/temp, or OBD-II)
-            if (subtitle != null) ...[
-              const SizedBox(height: 2),
+            const SizedBox(height: 6),
+
+            // BM300 data (primary if available)
+            if (hasBm300) ...[
+              // BM300 Voltage and SOC on same row
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    bm300Voltage.toStringAsFixed(2),
+                    style: TextStyle(
+                      fontSize: valueSize,
+                      fontWeight: FontWeight.bold,
+                      color: primaryColor,
+                    ),
+                  ),
+                  Text(
+                    'V',
+                    style: TextStyle(
+                      fontSize: unitSize,
+                      fontWeight: FontWeight.w500,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const Spacer(),
+                  // SOC badge
+                  if (bm300Soc != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: bm300Soc > 50 ? Colors.green.withOpacity(0.2) : Colors.orange.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '$bm300Soc%',
+                        style: TextStyle(
+                          fontSize: smallValueSize,
+                          fontWeight: FontWeight.bold,
+                          color: bm300Soc > 50 ? Colors.green : Colors.orange,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              // BM300 source label with temperature
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'BM300',
+                      style: TextStyle(
+                        fontSize: labelSize,
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (bm300Temp != null) ...[
+                    const SizedBox(width: 8),
+                    Icon(Icons.thermostat, size: labelSize + 2, color: theme.colorScheme.onSurfaceVariant),
+                    Text(
+                      ' $bm300Temp°C',
+                      style: TextStyle(
+                        fontSize: labelSize,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+
+            // OBD data (secondary if BM300 available, primary otherwise)
+            if (hasObd) ...[
+              if (hasBm300) ...[
+                const SizedBox(height: 6),
+                Divider(height: 1, color: theme.dividerColor.withOpacity(0.5)),
+                const SizedBox(height: 6),
+              ],
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    obdVoltage.toStringAsFixed(1),
+                    style: TextStyle(
+                      fontSize: hasBm300 ? smallValueSize : valueSize,
+                      fontWeight: FontWeight.bold,
+                      color: hasBm300 ? theme.colorScheme.onSurfaceVariant : getVoltageColor(obdVoltage),
+                    ),
+                  ),
+                  Text(
+                    'V',
+                    style: TextStyle(
+                      fontSize: hasBm300 ? labelSize : unitSize,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'OBD',
+                      style: TextStyle(
+                        fontSize: labelSize,
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+
+            // No data available
+            if (!hasBm300 && !hasObd) ...[
               Text(
-                subtitle,
+                '--',
                 style: TextStyle(
-                  fontSize: isCompact ? 10.0 : 11.0,
+                  fontSize: valueSize,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                ),
+              ),
+              Text(
+                'No data',
+                style: TextStyle(
+                  fontSize: labelSize,
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
             ],
           ],
