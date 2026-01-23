@@ -14,6 +14,7 @@ enum LogCategory {
   carInfo('[CarInfo]', 'Car Info', Icons.info),
   parser('[Parser]', 'Parser', Icons.code),
   dataSource('[DataSource]', 'Data Source', Icons.source),
+  bm300('[BM300]', 'BM300 12V', Icons.battery_std),
   other('', 'Other', Icons.more_horiz);
 
   final String prefix;

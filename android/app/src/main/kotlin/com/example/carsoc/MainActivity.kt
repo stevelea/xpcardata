@@ -20,8 +20,10 @@ class MainActivity : FlutterActivity() {
     private val LOCATION_CHANNEL = "com.example.carsoc/location"
     private val APP_LIFECYCLE_CHANNEL = "com.example.carsoc/app_lifecycle"
     private val KEEP_ALIVE_CHANNEL = "com.example.carsoc/keep_alive"
+    private val BM300_CHANNEL = "com.example.carsoc/bm300"
     private lateinit var bluetoothHelper: BluetoothHelper
     private lateinit var locationHelper: LocationHelper
+    private lateinit var bm300Helper: BM300BleHelper
     private var shouldMinimiseOnStart = false
     private var stayInBackground = false
     private var wasInBackground = false
@@ -39,6 +41,8 @@ class MainActivity : FlutterActivity() {
         bluetoothHelper = BluetoothHelper(applicationContext, this)
         // Initialize LocationHelper
         locationHelper = LocationHelper(applicationContext)
+        // Initialize BM300 BLE Helper
+        bm300Helper = BM300BleHelper(applicationContext)
 
         // Check if app was launched with start_minimised flag from BootReceiver
         shouldMinimiseOnStart = intent?.getBooleanExtra("start_minimised", false) ?: false
@@ -404,6 +408,104 @@ class MainActivity : FlutterActivity() {
                         result.success(running)
                     } catch (e: Exception) {
                         result.error("CHECK_FAILED", e.message, null)
+                    }
+                }
+                else -> {
+                    result.notImplemented()
+                }
+            }
+        }
+
+        // Set up BM300 Pro battery monitor method channel
+        val bm300Channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BM300_CHANNEL)
+
+        // Set up BM300 callback to send data to Flutter
+        bm300Helper.setCallback(object : BM300BleHelper.BM300Callback {
+            override fun onDeviceFound(name: String, address: String) {
+                runOnUiThread {
+                    bm300Channel.invokeMethod("onDeviceFound", mapOf(
+                        "name" to name,
+                        "address" to address
+                    ))
+                }
+            }
+
+            override fun onConnected() {
+                runOnUiThread {
+                    bm300Channel.invokeMethod("onConnected", null)
+                }
+            }
+
+            override fun onDisconnected() {
+                runOnUiThread {
+                    bm300Channel.invokeMethod("onDisconnected", null)
+                }
+            }
+
+            override fun onDataReceived(voltage: Double, soc: Int, temperature: Int) {
+                runOnUiThread {
+                    bm300Channel.invokeMethod("onDataReceived", mapOf(
+                        "voltage" to voltage,
+                        "soc" to soc,
+                        "temperature" to temperature
+                    ))
+                }
+            }
+
+            override fun onError(message: String) {
+                runOnUiThread {
+                    bm300Channel.invokeMethod("onError", mapOf("message" to message))
+                }
+            }
+        })
+
+        bm300Channel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "hasPermissions" -> {
+                    result.success(bm300Helper.hasPermissions())
+                }
+                "isBluetoothEnabled" -> {
+                    result.success(bm300Helper.isBluetoothEnabled())
+                }
+                "isConnected" -> {
+                    result.success(bm300Helper.isConnected())
+                }
+                "startScan" -> {
+                    try {
+                        val timeout = (call.argument<Number>("timeout")?.toLong()) ?: 10000L
+                        bm300Helper.startScan(timeout)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("SCAN_FAILED", e.message, null)
+                    }
+                }
+                "stopScan" -> {
+                    try {
+                        bm300Helper.stopScan()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("STOP_FAILED", e.message, null)
+                    }
+                }
+                "connect" -> {
+                    try {
+                        val address = call.argument<String>("address")
+                        if (address != null) {
+                            bm300Helper.connect(address)
+                            result.success(true)
+                        } else {
+                            result.error("INVALID_ARGUMENT", "Address is required", null)
+                        }
+                    } catch (e: Exception) {
+                        result.error("CONNECT_FAILED", e.message, null)
+                    }
+                }
+                "disconnect" -> {
+                    try {
+                        bm300Helper.disconnect()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("DISCONNECT_FAILED", e.message, null)
                     }
                 }
                 else -> {

@@ -11,6 +11,7 @@ import '../services/tailscale_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/fleet_analytics_service.dart';
 import '../services/mock_data_service.dart';
+import '../services/bm300_battery_service.dart';
 import '../widgets/dashboard_widgets.dart';
 import '../models/vehicle_data.dart';
 import '../models/charging_session.dart';
@@ -36,8 +37,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
   StreamSubscription<bool>? _connectivitySubscription;
   StreamSubscription<bool>? _mqttHeartbeatSubscription;
   StreamSubscription<ChargingSession>? _sessionSubscription;
+  StreamSubscription<BM300BatteryData>? _bm300DataSubscription;
   List<ChargingSession> _recentSessions = [];
   bool _isLoadingSessions = true;
+  BM300BatteryData? _bm300Data;
 
   @override
   void initState() {
@@ -106,6 +109,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
       _loadRecentSessions();
     });
 
+    // Listen for BM300 12V battery monitor data
+    _bm300DataSubscription = BM300BatteryService.instance.dataStream.listen((data) {
+      if (mounted) {
+        setState(() {
+          _bm300Data = data;
+        });
+      }
+    });
+    // Get current BM300 data if available
+    _bm300Data = BM300BatteryService.instance.lastData;
+
     // Register to listen for app lifecycle changes (refresh when app comes to foreground)
     WidgetsBinding.instance.addObserver(this);
   }
@@ -144,6 +158,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
     _connectivitySubscription?.cancel();
     _mqttHeartbeatSubscription?.cancel();
     _sessionSubscription?.cancel();
+    _bm300DataSubscription?.cancel();
     TailscaleService.instance.stopStatusMonitoring();
     ConnectivityService.instance.stopMonitoring();
     super.dispose();
@@ -626,9 +641,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
     final current = data.batteryCurrent?.toStringAsFixed(1) ?? '--';
     final power = data.power?.toStringAsFixed(1) ?? '--';
 
-    // 12V auxiliary battery voltage
-    final auxVoltage = data.additionalProperties?['AUX_V'] as double?;
-    final auxVoltageStr = auxVoltage?.toStringAsFixed(1) ?? '--';
+    // 12V auxiliary battery voltage - prefer BM300 Pro if connected, fallback to OBD AUX_V
+    final obdAuxVoltage = data.additionalProperties?['AUX_V'] as double?;
+    final bm300Voltage = _bm300Data?.voltage;
+    final bm300Soc = _bm300Data?.soc;
+    final bm300Temp = _bm300Data?.temperature;
+
+    // Use BM300 voltage if available, otherwise OBD AUX_V
+    final auxVoltage = bm300Voltage ?? obdAuxVoltage;
+    final auxVoltageStr = auxVoltage?.toStringAsFixed(2) ?? '--';
     // Color based on 12V voltage level
     final auxVoltageColor = auxVoltage == null
         ? Colors.grey
@@ -637,6 +658,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
             : auxVoltage < 12.5
                 ? Colors.orange
                 : Colors.green;
+    // Build 12V battery subtitle showing source and BM300 SOC/temp if available
+    String? aux12VSubtitle;
+    if (bm300Voltage != null) {
+      final parts = <String>[];
+      if (bm300Soc != null) parts.add('$bm300Soc%');
+      if (bm300Temp != null) parts.add('$bm300Temp°C');
+      aux12VSubtitle = parts.isNotEmpty ? 'BM300: ${parts.join(' ')}' : 'BM300 Pro';
+    } else if (obdAuxVoltage != null) {
+      aux12VSubtitle = 'OBD-II';
+    }
 
     final metrics = [
       // Guestimated Range moved from primary display (swapped with Speed)
@@ -661,14 +692,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
           isCompact: isCompact,
         ));
       }
-      gridChildren.add(MetricCard(
-        title: m.title,
-        value: m.value,
-        unit: m.unit,
-        icon: m.icon,
-        iconColor: m.color,
-        isCompact: isCompact,
-      ));
+      // Special handling for 12V Battery to show source (BM300/OBD) and extra data
+      if (m.title == '12V Battery') {
+        gridChildren.add(_build12VBatteryCard(
+          auxVoltageStr,
+          auxVoltageColor,
+          aux12VSubtitle,
+          isCompact,
+        ));
+      } else {
+        gridChildren.add(MetricCard(
+          title: m.title,
+          value: m.value,
+          unit: m.unit,
+          icon: m.icon,
+          iconColor: m.color,
+          isCompact: isCompact,
+        ));
+      }
     }
 
     return GridView.count(
@@ -679,6 +720,94 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
       crossAxisSpacing: 8,
       childAspectRatio: aspectRatio,
       children: gridChildren,
+    );
+  }
+
+  /// Build 12V battery card with BM300 Pro or OBD-II data
+  Widget _build12VBatteryCard(
+    String voltageStr,
+    Color voltageColor,
+    String? subtitle,
+    bool isCompact,
+  ) {
+    final theme = Theme.of(context);
+    final titleSize = isCompact ? 12.0 : 14.0;
+    final valueSize = isCompact ? 20.0 : 24.0;
+    final unitSize = isCompact ? 12.0 : 14.0;
+    final iconSize = isCompact ? 18.0 : 22.0;
+    final padding = isCompact ? 12.0 : 16.0;
+
+    return Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(padding),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.battery_full,
+                  size: iconSize,
+                  color: voltageColor,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '12V Battery',
+                    style: TextStyle(
+                      fontSize: titleSize,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const Spacer(),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  voltageStr,
+                  style: TextStyle(
+                    fontSize: valueSize,
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'V',
+                  style: TextStyle(
+                    fontSize: unitSize,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+            // Show source subtitle (BM300 with SOC/temp, or OBD-II)
+            if (subtitle != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: isCompact ? 10.0 : 11.0,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 
@@ -1427,6 +1556,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
         label: 'Fleet',
         isActive: FleetAnalyticsService.instance.isEnabled,
         activeColor: Colors.deepPurple,
+      ),
+      ServiceStatusIndicator(
+        icon: Icons.battery_std,
+        label: 'BM300',
+        isActive: BM300BatteryService.instance.isConnected,
+        activeColor: Colors.indigo,
       ),
     ];
 

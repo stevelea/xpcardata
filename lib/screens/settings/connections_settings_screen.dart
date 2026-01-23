@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,6 +7,7 @@ import '../../services/tailscale_service.dart';
 import '../../services/obd_proxy_service.dart';
 import '../../services/obd_service.dart';
 import '../../services/hive_storage_service.dart';
+import '../../services/bm300_battery_service.dart';
 import '../obd_connection_screen.dart';
 import '../obd_pid_config_screen.dart';
 
@@ -39,12 +41,22 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
   String? _proxyClientAddress;
   int _proxyPort = 35000;
 
+  // BM300 Pro Battery Monitor
+  final _bm300Service = BM300BatteryService.instance;
+  bool _bm300Enabled = false;
+  bool _bm300Scanning = false;
+  List<Map<String, String>> _bm300FoundDevices = [];
+  StreamSubscription<Map<String, String>>? _deviceFoundSubscription;
+  StreamSubscription<bool>? _connectionSubscription;
+  StreamSubscription<BM300BatteryData>? _dataSubscription;
+
   @override
   void initState() {
     super.initState();
     _loadSettings();
     _checkTailscale();
     _restoreProxyState();
+    _setupBM300Listeners();
   }
 
   @override
@@ -54,7 +66,141 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
     _usernameController.dispose();
     _passwordController.dispose();
     _vehicleIdController.dispose();
+    _deviceFoundSubscription?.cancel();
+    _connectionSubscription?.cancel();
+    _dataSubscription?.cancel();
     super.dispose();
+  }
+
+  void _setupBM300Listeners() {
+    // Load saved state
+    _bm300Enabled = _bm300Service.isEnabled;
+
+    // Listen for discovered devices during scan
+    _deviceFoundSubscription = _bm300Service.deviceFoundStream.listen((device) {
+      if (mounted) {
+        setState(() {
+          // Add device if not already in list
+          if (!_bm300FoundDevices.any((d) => d['address'] == device['address'])) {
+            _bm300FoundDevices.add(device);
+          }
+        });
+      }
+    });
+
+    // Listen for connection state changes
+    _connectionSubscription = _bm300Service.connectionStream.listen((connected) {
+      if (mounted) {
+        setState(() {
+          _bm300Scanning = false;
+        });
+        if (connected) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('BM300 Pro connected!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    });
+
+    // Listen for data updates (to refresh display)
+    _dataSubscription = _bm300Service.dataStream.listen((_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  Future<void> _startBM300Scan() async {
+    // Check permissions first
+    final hasPerms = await _bm300Service.hasPermissions();
+    if (!hasPerms) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bluetooth permissions required'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Check if Bluetooth is enabled
+    final btEnabled = await _bm300Service.isBluetoothEnabled();
+    if (!btEnabled) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please enable Bluetooth'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _bm300Scanning = true;
+      _bm300FoundDevices.clear();
+    });
+
+    try {
+      await _bm300Service.startScan(timeoutMs: 15000);
+
+      // Auto-stop scanning state after timeout
+      Future.delayed(const Duration(seconds: 15), () {
+        if (mounted && _bm300Scanning) {
+          setState(() => _bm300Scanning = false);
+        }
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _bm300Scanning = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Scan failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _connectBM300(String address) async {
+    try {
+      await _bm300Service.connect(address);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Connection failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _disconnectBM300() async {
+    await _bm300Service.disconnect();
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _forgetBM300Device() async {
+    await _bm300Service.forgetDevice();
+    if (mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('BM300 device forgotten'),
+        ),
+      );
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -503,6 +649,142 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
                       MaterialPageRoute(builder: (_) => const OBDPIDConfigScreen()),
                     ),
                   ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // BM300 Pro Battery Monitor Section
+          _buildSectionHeader('12V Battery Monitor (BM300 Pro)'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SwitchListTile(
+                    title: const Text('Enable BM300 Pro'),
+                    subtitle: const Text('Monitor 12V auxiliary battery via Bluetooth'),
+                    value: _bm300Enabled,
+                    onChanged: (value) async {
+                      if (value) {
+                        await _bm300Service.enable();
+                      } else {
+                        await _bm300Service.disable();
+                      }
+                      setState(() => _bm300Enabled = value);
+                    },
+                  ),
+                  if (_bm300Enabled) ...[
+                    const Divider(),
+                    // Connection Status
+                    ListTile(
+                      leading: Icon(
+                        _bm300Service.isConnected ? Icons.bluetooth_connected : Icons.bluetooth,
+                        color: _bm300Service.isConnected ? Colors.green : Colors.grey,
+                      ),
+                      title: Text(_bm300Service.isConnected
+                          ? 'Connected'
+                          : _bm300Service.savedDeviceAddress != null
+                              ? 'Saved device: ${_bm300Service.savedDeviceAddress}'
+                              : 'Not connected'),
+                      subtitle: _bm300Service.lastData != null
+                          ? Text(
+                              '${_bm300Service.lastData!.voltage.toStringAsFixed(2)}V  |  '
+                              '${_bm300Service.lastData!.soc}%  |  '
+                              '${_bm300Service.lastData!.temperature}°C')
+                          : null,
+                      trailing: _bm300Service.isConnected
+                          ? Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Text(
+                                'Live',
+                                style: TextStyle(color: Colors.white, fontSize: 12),
+                              ),
+                            )
+                          : null,
+                    ),
+                    const SizedBox(height: 8),
+                    // Scan / Connect / Disconnect buttons
+                    if (!_bm300Service.isConnected) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: _bm300Scanning ? null : _startBM300Scan,
+                              icon: _bm300Scanning
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.bluetooth_searching),
+                              label: Text(_bm300Scanning ? 'Scanning...' : 'Scan for Devices'),
+                            ),
+                          ),
+                          if (_bm300Service.savedDeviceAddress != null) ...[
+                            const SizedBox(width: 8),
+                            ElevatedButton.icon(
+                              onPressed: () => _connectBM300(_bm300Service.savedDeviceAddress!),
+                              icon: const Icon(Icons.link),
+                              label: const Text('Reconnect'),
+                            ),
+                          ],
+                        ],
+                      ),
+                      // Show found devices
+                      if (_bm300FoundDevices.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        const Text('Found Devices:', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        ..._bm300FoundDevices.map((device) => ListTile(
+                              leading: const Icon(Icons.battery_std, color: Colors.blue),
+                              title: Text(device['name'] ?? 'Unknown'),
+                              subtitle: Text(device['address'] ?? ''),
+                              trailing: ElevatedButton(
+                                onPressed: () => _connectBM300(device['address']!),
+                                child: const Text('Connect'),
+                              ),
+                              dense: true,
+                            )),
+                      ],
+                    ] else ...[
+                      // Connected - show disconnect option
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _disconnectBM300,
+                              icon: const Icon(Icons.bluetooth_disabled),
+                              label: const Text('Disconnect'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            onPressed: _forgetBM300Device,
+                            icon: const Icon(Icons.delete_outline),
+                            label: const Text('Forget'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Text(
+                      'The Ancel BM300 Pro monitors your 12V auxiliary battery. '
+                      'Data is displayed alongside OBD-II readings.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ],
                 ],
               ),
             ),
