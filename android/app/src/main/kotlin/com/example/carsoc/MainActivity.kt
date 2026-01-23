@@ -427,51 +427,50 @@ class MainActivity : FlutterActivity() {
         val bm300Channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BM300_CHANNEL)
 
         // Set up BM300 callback to send data to Flutter (only if helper is available)
+        // NOTE: Removed runOnUiThread as it doesn't work properly on AI boxes
+        // invokeMethod should be thread-safe according to Flutter docs
         bm300Helper?.setCallback(object : BM300BleHelper.BM300Callback {
             override fun onDeviceFound(name: String, address: String) {
-                runOnUiThread {
+                android.util.Log.d("BM300", "Callback onDeviceFound: $name ($address)")
+                try {
                     bm300Channel.invokeMethod("onDeviceFound", mapOf(
                         "name" to name,
                         "address" to address
                     ))
+                } catch (e: Exception) {
+                    android.util.Log.e("BM300", "invokeMethod failed: ${e.message}")
                 }
             }
 
             override fun onScanStopped(devicesFound: Int, totalCallbacks: Int) {
-                runOnUiThread {
-                    bm300Channel.invokeMethod("onScanStopped", mapOf(
-                        "devicesFound" to devicesFound,
-                        "totalCallbacks" to totalCallbacks
-                    ))
-                }
+                android.util.Log.d("BM300", "Callback onScanStopped: $devicesFound devices")
+                bm300Channel.invokeMethod("onScanStopped", mapOf(
+                    "devicesFound" to devicesFound,
+                    "totalCallbacks" to totalCallbacks
+                ))
             }
 
             override fun onConnected() {
-                runOnUiThread {
-                    bm300Channel.invokeMethod("onConnected", null)
-                }
+                android.util.Log.d("BM300", "Callback onConnected")
+                bm300Channel.invokeMethod("onConnected", null)
             }
 
             override fun onDisconnected() {
-                runOnUiThread {
-                    bm300Channel.invokeMethod("onDisconnected", null)
-                }
+                android.util.Log.d("BM300", "Callback onDisconnected")
+                bm300Channel.invokeMethod("onDisconnected", null)
             }
 
             override fun onDataReceived(voltage: Double, soc: Int, temperature: Int) {
-                runOnUiThread {
-                    bm300Channel.invokeMethod("onDataReceived", mapOf(
-                        "voltage" to voltage,
-                        "soc" to soc,
-                        "temperature" to temperature
-                    ))
-                }
+                bm300Channel.invokeMethod("onDataReceived", mapOf(
+                    "voltage" to voltage,
+                    "soc" to soc,
+                    "temperature" to temperature
+                ))
             }
 
             override fun onError(message: String) {
-                runOnUiThread {
-                    bm300Channel.invokeMethod("onError", mapOf("message" to message))
-                }
+                android.util.Log.d("BM300", "Callback onError: $message")
+                bm300Channel.invokeMethod("onError", mapOf("message" to message))
             }
         })
 
