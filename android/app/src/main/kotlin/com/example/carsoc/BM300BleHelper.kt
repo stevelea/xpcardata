@@ -697,31 +697,36 @@ class BM300BleHelper(private val context: Context) {
 
         @Deprecated("Deprecated in API 33")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-            android.util.Log.d(TAG, "onCharacteristicChanged (deprecated): uuid=${characteristic.uuid}")
-            handler.post { callback?.onError("GATT: notification received (deprecated API)") }
+            android.util.Log.d(TAG, "onCharacteristicChanged (deprecated API)")
             if (characteristic.uuid == NOTIFY_CHAR_UUID) {
-                @Suppress("DEPRECATION")
-                val data = characteristic.value
-                android.util.Log.d(TAG, "Received notification: ${data?.size ?: 0} bytes")
-                handler.post { callback?.onError("GATT: ${data?.size ?: 0} bytes received") }
-                if (data != null) {
-                    processNotification(data)
+                try {
+                    @Suppress("DEPRECATION")
+                    val data = characteristic.value
+                    if (data != null) {
+                        val rawHex = data.joinToString("") { "%02x".format(it) }
+                        android.util.Log.d(TAG, "DEP-NOTIFY[${data.size}]: $rawHex")
+                        handler.post { callback?.onError("DEP-NOTIFY[${data.size}]: $rawHex") }
+                        processNotification(data)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e(TAG, "deprecated onCharacteristicChanged error: ${e.message}")
+                    handler.post { callback?.onError("DEP-NOTIFY ERROR: ${e.message}") }
                 }
             }
         }
 
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-            try {
-                val rawHex = value.joinToString("") { "%02x".format(it) }
-                android.util.Log.d(TAG, "onCharacteristicChanged: ${value.size} bytes: $rawHex")
-                // Combine into one callback to reduce overhead
-                handler.post { callback?.onError("NOTIFY[${value.size}]: $rawHex") }
-                if (characteristic.uuid == NOTIFY_CHAR_UUID) {
+            android.util.Log.d(TAG, "onCharacteristicChanged (new API)")
+            if (characteristic.uuid == NOTIFY_CHAR_UUID) {
+                try {
+                    val rawHex = value.joinToString("") { "%02x".format(it) }
+                    android.util.Log.d(TAG, "NEW-NOTIFY[${value.size}]: $rawHex")
+                    handler.post { callback?.onError("NEW-NOTIFY[${value.size}]: $rawHex") }
                     processNotification(value)
+                } catch (e: Exception) {
+                    android.util.Log.e(TAG, "new onCharacteristicChanged error: ${e.message}")
+                    handler.post { callback?.onError("NEW-NOTIFY ERROR: ${e.message}") }
                 }
-            } catch (e: Exception) {
-                android.util.Log.e(TAG, "onCharacteristicChanged error: ${e.message}")
-                handler.post { callback?.onError("NOTIFY ERROR: ${e.message}") }
             }
         }
     }
