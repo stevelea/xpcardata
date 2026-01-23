@@ -811,28 +811,32 @@ class BM300BleHelper(private val context: Context) {
                 return
             }
 
-            // Parse data (based on Python implementation)
-            // Voltage: bytes 15-17 (hex positions 30-35), divided by 100
-            // SOC: bytes 12-13 (hex positions 24-27)
-            // Temperature: bytes 8-9 (hex positions 16-19), negative if byte 6 = "01"
+            // Parse data based on Python bm7-battery-monitor implementation
+            // Hex string format: d15507001b003c052600000000000000
+            //                    0         1
+            //                    0123456789012345678
+            // Temperature sign: hex[6:8] = "00" positive, "01" negative
+            // Temperature value: hex[8:10] = value in Celsius
+            // SOC: hex[12:14] = percentage
+            // Voltage: hex[15:18] = 3 hex chars, divide by 100 for volts
 
-            if (hexString.length >= 36) {
-                val voltageHex = hexString.substring(30, 34)
-                val socHex = hexString.substring(24, 26)
-                val tempHex = hexString.substring(16, 18)
-                val negativeTemp = hexString.substring(12, 14) == "01"
+            if (hexString.length >= 18) {
+                val tempSign = hexString.substring(6, 8)
+                val tempHex = hexString.substring(8, 10)
+                val socHex = hexString.substring(12, 14)
+                val voltageHex = hexString.substring(15, 18)  // 3 chars: positions 15,16,17
 
-                val voltage = voltageHex.toInt(16) / 100.0
-                val soc = socHex.toInt(16)
                 var temperature = tempHex.toInt(16)
-                if (negativeTemp) temperature = -temperature
+                if (tempSign == "01") temperature = -temperature
+                val soc = socHex.toInt(16)
+                val voltage = voltageHex.toInt(16) / 100.0
 
                 android.util.Log.d(TAG, "Parsed: Voltage=${voltage}V, SOC=$soc%, Temp=$temperature°C")
                 handler.post { callback?.onError("PARSED: ${voltage}V, $soc%, ${temperature}C") }
 
                 handler.post { callback?.onDataReceived(voltage, soc, temperature) }
             } else {
-                handler.post { callback?.onError("decrypt: hex too short (${hexString.length} < 36)") }
+                handler.post { callback?.onError("decrypt: hex too short (${hexString.length} < 18)") }
             }
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Error processing notification: ${e.message}")
