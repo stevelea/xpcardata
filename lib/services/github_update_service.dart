@@ -9,7 +9,7 @@ import 'hive_storage_service.dart';
 
 /// Hardcoded app version (updated during build)
 /// This avoids package_info_plus which fails on AAOS
-const String appVersion = '1.3.52';
+const String appVersion = '1.3.53';
 
 /// Service for checking and downloading updates from GitHub releases
 class GitHubUpdateService {
@@ -62,8 +62,23 @@ class GitHubUpdateService {
 
   /// Set GitHub token for authenticated requests (higher rate limit)
   Future<void> setGitHubToken(String? token) async {
-    _githubToken = token;
-    debugPrint('[Update] Saving GitHub token...');
+    // Trim and validate token
+    final cleanToken = token?.trim();
+
+    if (cleanToken != null && cleanToken.isNotEmpty) {
+      // Validate token format - must be alphanumeric with underscores
+      if (!RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(cleanToken)) {
+        debugPrint('[Update] Invalid token format - contains invalid characters');
+        return;
+      }
+      if (cleanToken.length < 10) {
+        debugPrint('[Update] Invalid token format - too short');
+        return;
+      }
+    }
+
+    _githubToken = cleanToken;
+    debugPrint('[Update] Saving GitHub token (${cleanToken?.length ?? 0} chars)...');
 
     // Try Hive first (works on AI boxes)
     final hive = HiveStorageService.instance;
@@ -177,7 +192,16 @@ class GitHubUpdateService {
 
       // Add auth token if available (increases rate limit from 60 to 5000/hour)
       if (_githubToken != null && _githubToken!.isNotEmpty) {
-        headers['Authorization'] = 'token $_githubToken';
+        // Validate token format - must be alphanumeric with underscores, typically starts with ghp_ or gho_
+        final token = _githubToken!.trim();
+        if (token.length >= 10 && RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(token)) {
+          headers['Authorization'] = 'token $token';
+          debugPrint('[Update] Using GitHub token (${token.length} chars, starts with ${token.substring(0, 4)}...)');
+        } else {
+          debugPrint('[Update] Invalid token format, ignoring (length=${token.length})');
+          // Clear invalid token
+          _githubToken = null;
+        }
       }
 
       final response = await http.get(

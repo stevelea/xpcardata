@@ -436,6 +436,15 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+            override fun onScanStopped(devicesFound: Int, totalCallbacks: Int) {
+                runOnUiThread {
+                    bm300Channel.invokeMethod("onScanStopped", mapOf(
+                        "devicesFound" to devicesFound,
+                        "totalCallbacks" to totalCallbacks
+                    ))
+                }
+            }
+
             override fun onConnected() {
                 runOnUiThread {
                     bm300Channel.invokeMethod("onConnected", null)

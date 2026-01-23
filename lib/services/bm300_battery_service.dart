@@ -116,6 +116,14 @@ class BM300BatteryService {
         _deviceFoundController.add(device);
         break;
 
+      case 'onScanStopped':
+        final args = call.arguments as Map<dynamic, dynamic>;
+        final devicesFound = args['devicesFound'] as int;
+        final totalCallbacks = args['totalCallbacks'] as int;
+        _isScanning = false;
+        _logger.log('[BM300] Scan stopped: $devicesFound unique devices, $totalCallbacks total BLE callbacks');
+        break;
+
       case 'onConnected':
         _isConnected = true;
         _isScanning = false;
@@ -208,8 +216,17 @@ class BM300BatteryService {
 
     try {
       _isScanning = true;
+      _logger.log('[BM300] Starting scan (timeout: ${timeoutMs}ms)...');
       await _channel.invokeMethod('startScan', {'timeout': timeoutMs});
-      _logger.log('[BM300] Scan started');
+      _logger.log('[BM300] Scan started successfully');
+
+      // Log when scan times out
+      Future.delayed(Duration(milliseconds: timeoutMs + 1000), () {
+        if (_isScanning) {
+          _isScanning = false;
+          _logger.log('[BM300] Scan timed out - no devices found');
+        }
+      });
     } catch (e) {
       _isScanning = false;
       _logger.log('[BM300] Scan error: $e');

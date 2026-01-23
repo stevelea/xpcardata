@@ -63,6 +63,7 @@ class BM300BleHelper(private val context: Context) {
     // Callback interface
     interface BM300Callback {
         fun onDeviceFound(name: String, address: String)
+        fun onScanStopped(devicesFound: Int, totalCallbacks: Int)
         fun onConnected()
         fun onDisconnected()
         fun onDataReceived(voltage: Double, soc: Int, temperature: Int)
@@ -185,7 +186,10 @@ class BM300BleHelper(private val context: Context) {
         try {
             bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
             isScanning = false
-            android.util.Log.d(TAG, "Scan stopped - saw ${seenDevices.size} unique devices, ${scanDeviceCount} total callbacks, ${reportedBM300Devices.size} BM300 matches")
+            val devicesFound = seenDevices.size
+            val totalCalls = scanDeviceCount
+            android.util.Log.d(TAG, "Scan stopped - saw $devicesFound unique devices, $totalCalls total callbacks, ${reportedBM300Devices.size} BM300 matches")
+            callback?.onScanStopped(devicesFound, totalCalls)
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Error stopping scan: ${e.message}")
         }
