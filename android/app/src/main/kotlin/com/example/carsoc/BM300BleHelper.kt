@@ -149,24 +149,28 @@ class BM300BleHelper(private val context: Context) {
         }
 
         android.util.Log.d(TAG, "Starting BLE scan for BM300 devices (service UUID: $SERVICE_UUID)")
+        android.util.Log.d(TAG, "BLE adapter: ${bluetoothAdapter?.name}, state: ${bluetoothAdapter?.state}")
+        android.util.Log.d(TAG, "Scanner object: $scanner")
         isScanning = true
-        reportedDevices.clear()  // Clear previously found devices
+        seenDevices.clear()  // Clear previously seen devices
+        reportedBM300Devices.clear()  // Clear previously reported BM300 devices
+        scanDeviceCount = 0  // Reset device counter
 
         val scanSettings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
-        // Create scan filter for devices advertising the FFF0 service UUID
-        val serviceFilter = ScanFilter.Builder()
-            .setServiceUuid(android.os.ParcelUuid(SERVICE_UUID))
-            .build()
-
-        // Also scan without filter to catch devices that don't advertise service UUID
-        // We'll filter in the callback by checking both name and service data
-        android.util.Log.d(TAG, "Scanning with service UUID filter AND unfiltered scan")
-
         // Start unfiltered scan (filter in callback) - more reliable for catching all devices
-        scanner.startScan(null, scanSettings, scanCallback)
+        android.util.Log.d(TAG, "Calling scanner.startScan()...")
+        try {
+            scanner.startScan(null, scanSettings, scanCallback)
+            android.util.Log.d(TAG, "scanner.startScan() completed successfully")
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "scanner.startScan() FAILED: ${e.message}")
+            callback?.onError("BLE scan start failed: ${e.message}")
+            isScanning = false
+            return
+        }
 
         // Stop scan after timeout
         handler.postDelayed({
@@ -181,17 +185,21 @@ class BM300BleHelper(private val context: Context) {
         try {
             bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
             isScanning = false
-            android.util.Log.d(TAG, "Scan stopped")
+            android.util.Log.d(TAG, "Scan stopped - saw ${seenDevices.size} unique devices, ${scanDeviceCount} total callbacks, ${reportedBM300Devices.size} BM300 matches")
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Error stopping scan: ${e.message}")
         }
     }
 
-    // Track devices we've already reported to avoid duplicates
-    private val reportedDevices = mutableSetOf<String>()
+    // Track devices we've already seen during this scan (for logging)
+    private val seenDevices = mutableSetOf<String>()
+    // Track BM300 devices we've already reported to Flutter
+    private val reportedBM300Devices = mutableSetOf<String>()
+    private var scanDeviceCount = 0
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
+            scanDeviceCount++
             try {
                 val deviceName = result.device.name
                 val deviceAddress = result.device.address
@@ -202,9 +210,11 @@ class BM300BleHelper(private val context: Context) {
                 val hasFFF0Service = serviceUuids?.any { it.uuid == SERVICE_UUID } ?: false
 
                 // Log ALL devices for debugging (first time we see them)
-                if (!reportedDevices.contains(deviceAddress)) {
+                val isNewDevice = !seenDevices.contains(deviceAddress)
+                if (isNewDevice) {
+                    seenDevices.add(deviceAddress)
                     val servicesStr = serviceUuids?.joinToString(",") { it.uuid.toString().substring(4, 8) } ?: "none"
-                    android.util.Log.d(TAG, "BLE device: name='$deviceName' addr=$deviceAddress services=[$servicesStr] hasFFF0=$hasFFF0Service")
+                    android.util.Log.d(TAG, "BLE #${seenDevices.size}: name='$deviceName' addr=$deviceAddress services=[$servicesStr] hasFFF0=$hasFFF0Service")
                 }
 
                 // Check if this looks like a BM300 Pro device:
@@ -225,10 +235,10 @@ class BM300BleHelper(private val context: Context) {
                     else -> false
                 }
 
-                if (isBM300 && !reportedDevices.contains(deviceAddress)) {
-                    reportedDevices.add(deviceAddress)
+                if (isBM300 && !reportedBM300Devices.contains(deviceAddress)) {
+                    reportedBM300Devices.add(deviceAddress)
                     val displayName = deviceName ?: if (hasFFF0Service) "BM Battery Monitor" else "BM300"
-                    android.util.Log.d(TAG, "*** Found BM300 device: $displayName ($deviceAddress) hasFFF0=$hasFFF0Service ***")
+                    android.util.Log.d(TAG, "*** MATCH! BM300 device: $displayName ($deviceAddress) hasFFF0=$hasFFF0Service ***")
                     callback?.onDeviceFound(displayName, deviceAddress)
                 }
             } catch (e: SecurityException) {
