@@ -119,6 +119,15 @@ class BM300BleHelper(private val context: Context) {
     fun isConnected(): Boolean = isConnected
 
     /**
+     * Check if location services are enabled (required for BLE scanning)
+     */
+    fun isLocationEnabled(): Boolean {
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
+        return locationManager?.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) == true ||
+               locationManager?.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER) == true
+    }
+
+    /**
      * Scan for BM300 Pro devices
      */
     @Throws(SecurityException::class)
@@ -126,6 +135,13 @@ class BM300BleHelper(private val context: Context) {
         if (!hasPermissions()) {
             callback?.onError("Bluetooth permissions not granted")
             return
+        }
+
+        // Check if location is enabled - required for BLE scanning on Android
+        if (!isLocationEnabled()) {
+            android.util.Log.w(TAG, "Location services are DISABLED - BLE scanning may not work!")
+            callback?.onError("Location services must be enabled for BLE scanning")
+            // Continue anyway - some devices work without it
         }
 
         if (bluetoothManager == null) {

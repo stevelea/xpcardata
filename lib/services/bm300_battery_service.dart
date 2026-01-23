@@ -210,12 +210,33 @@ class BM300BatteryService {
     _logger.log('[BM300] Disabled');
   }
 
+  /// Check if location services are enabled
+  Future<bool> isLocationEnabled() async {
+    try {
+      return await _channel.invokeMethod<bool>('isLocationEnabled') ?? false;
+    } catch (e) {
+      _logger.log('[BM300] Error checking location: $e');
+      return false;
+    }
+  }
+
   /// Start scanning for BM300 Pro devices
   Future<void> startScan({int timeoutMs = 10000}) async {
     if (_isScanning) return;
 
     try {
       _isScanning = true;
+
+      // Log diagnostic info
+      final hasPerms = await hasPermissions();
+      final btEnabled = await isBluetoothEnabled();
+      final locEnabled = await isLocationEnabled();
+      _logger.log('[BM300] Scan diagnostics: permissions=$hasPerms, bluetooth=$btEnabled, location=$locEnabled');
+
+      if (!locEnabled) {
+        _logger.log('[BM300] WARNING: Location services disabled - BLE scan may not find devices!');
+      }
+
       _logger.log('[BM300] Starting scan (timeout: ${timeoutMs}ms)...');
       await _channel.invokeMethod('startScan', {'timeout': timeoutMs});
       _logger.log('[BM300] Scan started successfully');

@@ -497,6 +497,9 @@ class MainActivity : FlutterActivity() {
                 "isBluetoothEnabled" -> {
                     result.success(helper.isBluetoothEnabled())
                 }
+                "isLocationEnabled" -> {
+                    result.success(helper.isLocationEnabled())
+                }
                 "isConnected" -> {
                     result.success(helper.isConnected())
                 }
