@@ -173,14 +173,21 @@ class BM300BleHelper(private val context: Context) {
         reportedBM300Devices.clear()  // Clear previously reported BM300 devices
         scanDeviceCount = 0  // Reset device counter
 
+        // Use BALANCED mode - works better on some devices like OnePlus
         val scanSettings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+            .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
+            .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
+            .setReportDelay(0)
             .build()
 
-        // Start unfiltered scan (filter in callback) - more reliable for catching all devices
-        android.util.Log.d(TAG, "Calling scanner.startScan()...")
+        // Use empty filter list instead of null - some devices require this
+        val scanFilters = listOf<ScanFilter>()
+
+        android.util.Log.d(TAG, "Calling scanner.startScan() with BALANCED mode...")
         try {
-            scanner.startScan(null, scanSettings, scanCallback)
+            scanner.startScan(scanFilters, scanSettings, scanCallback)
             android.util.Log.d(TAG, "scanner.startScan() completed successfully")
         } catch (e: Exception) {
             android.util.Log.e(TAG, "scanner.startScan() FAILED: ${e.message}")
