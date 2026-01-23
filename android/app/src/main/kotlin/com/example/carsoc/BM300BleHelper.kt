@@ -142,6 +142,7 @@ class BM300BleHelper(private val context: Context) {
 
         android.util.Log.d(TAG, "Starting BLE scan for $DEVICE_NAME")
         isScanning = true
+        reportedDevices.clear()  // Clear previously found devices
 
         val scanSettings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -169,26 +170,38 @@ class BM300BleHelper(private val context: Context) {
         }
     }
 
+    // Track devices we've already reported to avoid duplicates
+    private val reportedDevices = mutableSetOf<String>()
+
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             try {
                 val deviceName = result.device.name
                 val deviceAddress = result.device.address
 
+                // Log ALL devices for debugging (first time we see them)
+                if (!reportedDevices.contains(deviceAddress)) {
+                    android.util.Log.d(TAG, "BLE device found: name='$deviceName' addr=$deviceAddress")
+                }
+
                 // Check if this looks like a BM300 Pro device:
                 // 1. Named exactly "BM300 Pro"
                 // 2. Name is a 12-character hex string (serial number like "3CAB72B2A9C0")
                 // 3. Name contains "BM" prefix
+                // 4. Address matches a known BM300 pattern (some broadcast without name initially)
                 val isBM300 = when {
                     deviceName == null -> false
                     deviceName == DEVICE_NAME -> true
                     deviceName.matches(Regex("^[0-9A-Fa-f]{12}$")) -> true  // 12 hex chars (serial number)
                     deviceName.startsWith("BM") -> true  // BM prefix variations
+                    deviceName.contains("BM300", ignoreCase = true) -> true  // Contains BM300
+                    deviceName.contains("Ancel", ignoreCase = true) -> true  // Ancel brand
                     else -> false
                 }
 
-                if (isBM300) {
-                    android.util.Log.d(TAG, "Found BM300 device: $deviceName ($deviceAddress)")
+                if (isBM300 && !reportedDevices.contains(deviceAddress)) {
+                    reportedDevices.add(deviceAddress)
+                    android.util.Log.d(TAG, "*** Found BM300 device: $deviceName ($deviceAddress) ***")
                     callback?.onDeviceFound(deviceName ?: "BM300", deviceAddress)
                 }
             } catch (e: SecurityException) {
