@@ -150,11 +150,16 @@ class BM300BatteryService {
   /// Check if Bluetooth is enabled
   Future<bool> isBluetoothEnabled() async {
     try {
-      final state = await FlutterBluePlus.adapterState.first;
-      return state == BluetoothAdapterState.on;
+      final state = await FlutterBluePlus.adapterState.first.timeout(
+        const Duration(seconds: 3),
+        onTimeout: () => BluetoothAdapterState.on, // Assume on if timeout
+      );
+      _logger.log('[BM300] Bluetooth adapter state: $state');
+      // Return true unless we know for sure it's off
+      return state != BluetoothAdapterState.off;
     } catch (e) {
-      _logger.log('[BM300] Error checking Bluetooth: $e');
-      return false;
+      _logger.log('[BM300] Error checking Bluetooth: $e - assuming enabled');
+      return true; // Assume enabled on error (let scan fail if not)
     }
   }
 
@@ -197,16 +202,26 @@ class BM300BatteryService {
     try {
       _isScanning = true;
 
-      // Check Bluetooth state
-      final btState = await FlutterBluePlus.adapterState.first;
-      _logger.log('[BM300] Bluetooth state: $btState');
+      // Check Bluetooth state with timeout (some devices hang on this)
+      BluetoothAdapterState btState = BluetoothAdapterState.unknown;
+      try {
+        btState = await FlutterBluePlus.adapterState.first.timeout(
+          const Duration(seconds: 3),
+          onTimeout: () => BluetoothAdapterState.on, // Assume on if timeout
+        );
+        _logger.log('[BM300] Bluetooth state: $btState');
+      } catch (e) {
+        _logger.log('[BM300] Bluetooth state check failed: $e - assuming enabled');
+        btState = BluetoothAdapterState.on; // Assume enabled and try anyway
+      }
 
-      if (btState != BluetoothAdapterState.on) {
-        _logger.log('[BM300] Bluetooth is not enabled!');
+      if (btState == BluetoothAdapterState.off) {
+        _logger.log('[BM300] Bluetooth is OFF - cannot scan');
         _isScanning = false;
         return;
       }
 
+      // Proceed with scan even if state is unknown/unavailable (try anyway on AI boxes)
       _logger.log('[BM300] Starting flutter_blue_plus scan (timeout: ${timeoutMs}ms)...');
 
       // Track seen devices
@@ -251,12 +266,16 @@ class BM300BatteryService {
       });
 
       // Start scanning
-      await FlutterBluePlus.startScan(
-        timeout: Duration(milliseconds: timeoutMs),
-        androidUsesFineLocation: true,
-      );
-
-      _logger.log('[BM300] Scan started successfully');
+      try {
+        await FlutterBluePlus.startScan(
+          timeout: Duration(milliseconds: timeoutMs),
+          androidUsesFineLocation: true,
+        );
+        _logger.log('[BM300] Scan started successfully');
+      } catch (e) {
+        _logger.log('[BM300] FlutterBluePlus.startScan failed: $e');
+        // Don't rethrow - let the scan timeout handle cleanup
+      }
 
       // Log progress every 10 seconds
       int progressCount = 0;
