@@ -5,10 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'hive_storage_service.dart';
 
 /// Hardcoded app version (updated during build)
 /// This avoids package_info_plus which fails on AAOS
-const String appVersion = '1.3.51';
+const String appVersion = '1.3.52';
 
 /// Service for checking and downloading updates from GitHub releases
 class GitHubUpdateService {
@@ -62,48 +63,97 @@ class GitHubUpdateService {
   /// Set GitHub token for authenticated requests (higher rate limit)
   Future<void> setGitHubToken(String? token) async {
     _githubToken = token;
+    debugPrint('[Update] Saving GitHub token...');
 
-    // Try SharedPreferences first
+    // Try Hive first (works on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      try {
+        if (token != null && token.isNotEmpty) {
+          await hive.saveSetting('github_token', token);
+          debugPrint('[Update] Token saved to Hive');
+          return;
+        } else {
+          await hive.deleteSetting('github_token');
+          debugPrint('[Update] Token removed from Hive');
+          return;
+        }
+      } catch (e) {
+        debugPrint('[Update] Hive save failed: $e');
+      }
+    }
+
+    // Try SharedPreferences as fallback
     try {
       final prefs = await SharedPreferences.getInstance();
       if (token != null && token.isNotEmpty) {
         await prefs.setString('github_token', token);
+        debugPrint('[Update] Token saved to SharedPreferences');
       } else {
         await prefs.remove('github_token');
+        debugPrint('[Update] Token removed from SharedPreferences');
       }
     } catch (e) {
-      // SharedPreferences may fail on AAOS - use file-based fallback
+      debugPrint('[Update] SharedPreferences save failed: $e');
+      // Try file-based fallback
       try {
-        final directory = await getExternalStorageDirectory() ?? await getTemporaryDirectory();
-        final file = File('${directory.path}/github_token.txt');
+        final file = File('/data/data/com.example.carsoc/files/github_token.txt');
         if (token != null && token.isNotEmpty) {
           await file.writeAsString(token);
+          debugPrint('[Update] Token saved to file');
         } else if (await file.exists()) {
           await file.delete();
+          debugPrint('[Update] Token file deleted');
         }
-      } catch (_) {
-        // Ignore - token storage failed but in-memory token is still set
+      } catch (e2) {
+        debugPrint('[Update] File save failed: $e2');
       }
     }
   }
 
   /// Load GitHub token from storage
   Future<void> loadGitHubToken() async {
+    debugPrint('[Update] Loading GitHub token...');
+
+    // Try Hive first (works on AI boxes)
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      try {
+        _githubToken = hive.getSetting<String>('github_token');
+        if (_githubToken != null) {
+          debugPrint('[Update] Token loaded from Hive');
+          return;
+        }
+      } catch (e) {
+        debugPrint('[Update] Hive load failed: $e');
+      }
+    }
+
+    // Try SharedPreferences as fallback
     try {
       final prefs = await SharedPreferences.getInstance();
       _githubToken = prefs.getString('github_token');
-    } catch (e) {
-      // SharedPreferences may fail on AAOS - try file-based fallback
-      try {
-        final directory = await getExternalStorageDirectory() ?? await getTemporaryDirectory();
-        final file = File('${directory.path}/github_token.txt');
-        if (await file.exists()) {
-          _githubToken = await file.readAsString();
-        }
-      } catch (_) {
-        // Ignore - token will remain null
+      if (_githubToken != null) {
+        debugPrint('[Update] Token loaded from SharedPreferences');
+        return;
       }
+    } catch (e) {
+      debugPrint('[Update] SharedPreferences load failed: $e');
     }
+
+    // Try file-based fallback
+    try {
+      final file = File('/data/data/com.example.carsoc/files/github_token.txt');
+      if (await file.exists()) {
+        _githubToken = await file.readAsString();
+        debugPrint('[Update] Token loaded from file');
+        return;
+      }
+    } catch (e) {
+      debugPrint('[Update] File load failed: $e');
+    }
+
+    debugPrint('[Update] No token found in any storage');
   }
 
   /// Check for updates from GitHub
