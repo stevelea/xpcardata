@@ -513,6 +513,21 @@ class MainActivity : FlutterActivity() {
                         result.error("SCAN_FAILED", e.message, null)
                     }
                 }
+                "testCallback" -> {
+                    // Test that callback mechanism works by sending a test device immediately
+                    android.util.Log.d("BM300", "testCallback called from Flutter")
+                    try {
+                        bm300Channel.invokeMethod("onDeviceFound", mapOf(
+                            "name" to "CALLBACK_TEST",
+                            "address" to "11:22:33:44:55:66"
+                        ))
+                        android.util.Log.d("BM300", "testCallback invokeMethod completed")
+                        result.success(true)
+                    } catch (e: Exception) {
+                        android.util.Log.e("BM300", "testCallback failed: ${e.message}")
+                        result.error("CALLBACK_FAILED", e.message, null)
+                    }
+                }
                 "stopScan" -> {
                     try {
                         helper.stopScan()

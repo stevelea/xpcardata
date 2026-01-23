@@ -427,6 +427,15 @@ class BM300BatteryService {
 
       _logger.log('[BM300] Starting native BLE scan (${timeoutMs / 1000}s)...');
 
+      // First test if callback works by calling testCallback
+      try {
+        _logger.log('[BM300] Testing callback mechanism...');
+        await _channel.invokeMethod('testCallback');
+        _logger.log('[BM300] testCallback completed - check if CALLBACK_TEST device appeared');
+      } catch (e) {
+        _logger.log('[BM300] testCallback failed: $e');
+      }
+
       // Start native scan - pass 'timeout' as expected by native code
       await _channel.invokeMethod('startScan', {'timeout': timeoutMs});
       _logger.log('[BM300] Native scan started');

@@ -177,14 +177,20 @@ class BM300BleHelper(private val context: Context) {
         android.util.Log.d(TAG, "Starting scan for BM300 devices...")
         android.util.Log.d(TAG, "BLE adapter: ${bluetoothAdapter?.name}, state: ${bluetoothAdapter?.state}")
         android.util.Log.d(TAG, "Context type: ${context.javaClass.simpleName}")
+        android.util.Log.d(TAG, "Callback is ${if (callback != null) "SET" else "NULL"}")
 
         seenDevices.clear()
         reportedBM300Devices.clear()
         scanDeviceCount = 0
 
         // Send test callback immediately to verify callback mechanism works
-        callback?.onDeviceFound("TEST_DEVICE", "00:00:00:00:00:00")
-        android.util.Log.d(TAG, "Sent TEST_DEVICE callback to verify mechanism")
+        if (callback != null) {
+            android.util.Log.d(TAG, "Calling onDeviceFound for TEST_DEVICE...")
+            callback?.onDeviceFound("TEST_DEVICE", "00:00:00:00:00:00")
+            android.util.Log.d(TAG, "TEST_DEVICE callback completed")
+        } else {
+            android.util.Log.e(TAG, "ERROR: callback is null! Cannot send device found events!")
+        }
 
         // Start classic Bluetooth discovery FIRST (works on more devices including AI boxes)
         startClassicDiscovery()
