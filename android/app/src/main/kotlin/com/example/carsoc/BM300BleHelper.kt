@@ -140,7 +140,7 @@ class BM300BleHelper(private val context: Context) {
             return
         }
 
-        android.util.Log.d(TAG, "Starting BLE scan for $DEVICE_NAME")
+        android.util.Log.d(TAG, "Starting BLE scan for BM300 devices (service UUID: $SERVICE_UUID)")
         isScanning = true
         reportedDevices.clear()  // Clear previously found devices
 
@@ -148,7 +148,16 @@ class BM300BleHelper(private val context: Context) {
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
-        // Scan for any device, filter by name in callback
+        // Create scan filter for devices advertising the FFF0 service UUID
+        val serviceFilter = ScanFilter.Builder()
+            .setServiceUuid(android.os.ParcelUuid(SERVICE_UUID))
+            .build()
+
+        // Also scan without filter to catch devices that don't advertise service UUID
+        // We'll filter in the callback by checking both name and service data
+        android.util.Log.d(TAG, "Scanning with service UUID filter AND unfiltered scan")
+
+        // Start unfiltered scan (filter in callback) - more reliable for catching all devices
         scanner.startScan(null, scanSettings, scanCallback)
 
         // Stop scan after timeout
@@ -178,31 +187,41 @@ class BM300BleHelper(private val context: Context) {
             try {
                 val deviceName = result.device.name
                 val deviceAddress = result.device.address
+                val scanRecord = result.scanRecord
+
+                // Check if device advertises FFF0 service UUID
+                val serviceUuids = scanRecord?.serviceUuids
+                val hasFFF0Service = serviceUuids?.any { it.uuid == SERVICE_UUID } ?: false
 
                 // Log ALL devices for debugging (first time we see them)
                 if (!reportedDevices.contains(deviceAddress)) {
-                    android.util.Log.d(TAG, "BLE device found: name='$deviceName' addr=$deviceAddress")
+                    val servicesStr = serviceUuids?.joinToString(",") { it.uuid.toString().substring(4, 8) } ?: "none"
+                    android.util.Log.d(TAG, "BLE device: name='$deviceName' addr=$deviceAddress services=[$servicesStr] hasFFF0=$hasFFF0Service")
                 }
 
                 // Check if this looks like a BM300 Pro device:
-                // 1. Named exactly "BM300 Pro"
-                // 2. Name is a 12-character hex string (serial number like "3CAB72B2A9C0")
-                // 3. Name contains "BM" prefix
-                // 4. Address matches a known BM300 pattern (some broadcast without name initially)
+                // 1. Device advertises FFF0 service UUID (most reliable)
+                // 2. Named exactly "BM300 Pro"
+                // 3. Name is a 12-character hex string (serial number like "3CAB72B2A9C0")
+                // 4. Name contains "BM" prefix or brand names
                 val isBM300 = when {
+                    hasFFF0Service -> true  // Has FFF0 service - definitely a BM300/BM6 type device
                     deviceName == null -> false
                     deviceName == DEVICE_NAME -> true
                     deviceName.matches(Regex("^[0-9A-Fa-f]{12}$")) -> true  // 12 hex chars (serial number)
                     deviceName.startsWith("BM") -> true  // BM prefix variations
                     deviceName.contains("BM300", ignoreCase = true) -> true  // Contains BM300
+                    deviceName.contains("BM6", ignoreCase = true) -> true  // BM6 variant
                     deviceName.contains("Ancel", ignoreCase = true) -> true  // Ancel brand
+                    deviceName.contains("Battery", ignoreCase = true) && deviceName.contains("Monitor", ignoreCase = true) -> true
                     else -> false
                 }
 
                 if (isBM300 && !reportedDevices.contains(deviceAddress)) {
                     reportedDevices.add(deviceAddress)
-                    android.util.Log.d(TAG, "*** Found BM300 device: $deviceName ($deviceAddress) ***")
-                    callback?.onDeviceFound(deviceName ?: "BM300", deviceAddress)
+                    val displayName = deviceName ?: if (hasFFF0Service) "BM Battery Monitor" else "BM300"
+                    android.util.Log.d(TAG, "*** Found BM300 device: $displayName ($deviceAddress) hasFFF0=$hasFFF0Service ***")
+                    callback?.onDeviceFound(displayName, deviceAddress)
                 }
             } catch (e: SecurityException) {
                 android.util.Log.e(TAG, "Security exception in scan callback: ${e.message}")
