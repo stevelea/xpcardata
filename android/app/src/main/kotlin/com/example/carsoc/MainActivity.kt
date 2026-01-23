@@ -41,15 +41,8 @@ class MainActivity : FlutterActivity() {
         bluetoothHelper = BluetoothHelper(applicationContext, this)
         // Initialize LocationHelper
         locationHelper = LocationHelper(applicationContext)
-        // Initialize BM300 BLE Helper with Activity context (required for BLE scan callbacks)
-        // Using 'this' (Activity) instead of applicationContext for proper BLE callback delivery
-        try {
-            bm300Helper = BM300BleHelper(this)
-            android.util.Log.d("MainActivity", "BM300BleHelper initialized with Activity context")
-        } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "Failed to initialize BM300BleHelper: ${e.message}")
-            bm300Helper = null
-        }
+        // Note: BM300 BLE Helper is initialized in configureFlutterEngine where we need it
+        // This ensures the helper exists when we set up the callback
 
         // Check if app was launched with start_minimised flag from BootReceiver
         shouldMinimiseOnStart = intent?.getBooleanExtra("start_minimised", false) ?: false
@@ -426,51 +419,82 @@ class MainActivity : FlutterActivity() {
         // Set up BM300 Pro battery monitor method channel
         val bm300Channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BM300_CHANNEL)
 
+        // Initialize BM300 BLE Helper here (inside configureFlutterEngine) to ensure it exists
+        // before we set up the callback. Using Activity context for proper BLE scan callbacks.
+        if (bm300Helper == null) {
+            try {
+                bm300Helper = BM300BleHelper(this)
+                android.util.Log.d("BM300", "BM300BleHelper initialized in configureFlutterEngine")
+            } catch (e: Exception) {
+                android.util.Log.e("BM300", "Failed to initialize BM300BleHelper: ${e.message}")
+            }
+        }
+
         // Set up BM300 callback to send data to Flutter (only if helper is available)
-        // NOTE: Removed runOnUiThread as it doesn't work properly on AI boxes
-        // invokeMethod should be thread-safe according to Flutter docs
+        // IMPORTANT: invokeMethod MUST be called from the main/UI thread
+        // BLE callbacks run on handler threads, so we need to post to main thread
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        val helper = bm300Helper
+        if (helper != null) {
+            android.util.Log.d("BM300", "Setting callback on helper ${helper.hashCode()}")
+        } else {
+            android.util.Log.e("BM300", "Cannot set callback - helper is null!")
+        }
         bm300Helper?.setCallback(object : BM300BleHelper.BM300Callback {
             override fun onDeviceFound(name: String, address: String) {
-                android.util.Log.d("BM300", "Callback onDeviceFound: $name ($address)")
-                try {
-                    bm300Channel.invokeMethod("onDeviceFound", mapOf(
-                        "name" to name,
-                        "address" to address
-                    ))
-                } catch (e: Exception) {
-                    android.util.Log.e("BM300", "invokeMethod failed: ${e.message}")
+                android.util.Log.d("BM300", "Callback onDeviceFound: $name ($address) [thread=${Thread.currentThread().name}]")
+                mainHandler.post {
+                    try {
+                        android.util.Log.d("BM300", "Posting onDeviceFound to Flutter [main thread]")
+                        bm300Channel.invokeMethod("onDeviceFound", mapOf(
+                            "name" to name,
+                            "address" to address
+                        ))
+                    } catch (e: Exception) {
+                        android.util.Log.e("BM300", "invokeMethod failed: ${e.message}")
+                    }
                 }
             }
 
             override fun onScanStopped(devicesFound: Int, totalCallbacks: Int) {
-                android.util.Log.d("BM300", "Callback onScanStopped: $devicesFound devices")
-                bm300Channel.invokeMethod("onScanStopped", mapOf(
-                    "devicesFound" to devicesFound,
-                    "totalCallbacks" to totalCallbacks
-                ))
+                android.util.Log.d("BM300", "Callback onScanStopped: $devicesFound devices [thread=${Thread.currentThread().name}]")
+                mainHandler.post {
+                    bm300Channel.invokeMethod("onScanStopped", mapOf(
+                        "devicesFound" to devicesFound,
+                        "totalCallbacks" to totalCallbacks
+                    ))
+                }
             }
 
             override fun onConnected() {
-                android.util.Log.d("BM300", "Callback onConnected")
-                bm300Channel.invokeMethod("onConnected", null)
+                android.util.Log.d("BM300", "Callback onConnected [thread=${Thread.currentThread().name}]")
+                mainHandler.post {
+                    bm300Channel.invokeMethod("onConnected", null)
+                }
             }
 
             override fun onDisconnected() {
-                android.util.Log.d("BM300", "Callback onDisconnected")
-                bm300Channel.invokeMethod("onDisconnected", null)
+                android.util.Log.d("BM300", "Callback onDisconnected [thread=${Thread.currentThread().name}]")
+                mainHandler.post {
+                    bm300Channel.invokeMethod("onDisconnected", null)
+                }
             }
 
             override fun onDataReceived(voltage: Double, soc: Int, temperature: Int) {
-                bm300Channel.invokeMethod("onDataReceived", mapOf(
-                    "voltage" to voltage,
-                    "soc" to soc,
-                    "temperature" to temperature
-                ))
+                mainHandler.post {
+                    bm300Channel.invokeMethod("onDataReceived", mapOf(
+                        "voltage" to voltage,
+                        "soc" to soc,
+                        "temperature" to temperature
+                    ))
+                }
             }
 
             override fun onError(message: String) {
-                android.util.Log.d("BM300", "Callback onError: $message")
-                bm300Channel.invokeMethod("onError", mapOf("message" to message))
+                android.util.Log.d("BM300", "Callback onError: $message [thread=${Thread.currentThread().name}]")
+                mainHandler.post {
+                    bm300Channel.invokeMethod("onError", mapOf("message" to message))
+                }
             }
         })
 

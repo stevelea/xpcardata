@@ -42,10 +42,12 @@ class BM300BleHelper(private val context: Context) {
         private val NOTIFY_CHAR_UUID = UUID.fromString("0000fff4-0000-1000-8000-00805f9b34fb")
         private val CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
-        // AES encryption key for BM300 Pro
+        // AES encryption key for BM300 Pro / BM7 (different from BM6!)
+        // Key = "leagend" + 0xFF + 0xFE + "010000@"
+        // Source: https://github.com/slydiman/bm7-battery-monitor
         private val AES_KEY = byteArrayOf(
-            108, 101, 97, 103, 101, 110, 100, -1,  // "legeng" + 0xFF 0xFE
-            -2, 48, 49, 48, 48, 48, 48, 64         // "010000@"
+            108, 101, 97, 103, 101, 110, 100, -1,  // "leagend" + 0xFF
+            -2, 48, 49, 48, 48, 48, 48, 64         // 0xFE + "010000@"
         )
 
         // Command to start notifications
@@ -92,6 +94,7 @@ class BM300BleHelper(private val context: Context) {
     private var isConnected = false
     private var isScanning = false
     private var isClassicScanning = false
+    private var notificationsEnabled = false  // Track if we've already enabled notifications
     private val handler = Handler(Looper.getMainLooper())
 
     // Handler thread for BLE operations (more reliable on some devices)
@@ -550,6 +553,7 @@ class BM300BleHelper(private val context: Context) {
         writeCharacteristic = null
         notifyCharacteristic = null
         isConnected = false
+        notificationsEnabled = false
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
@@ -581,6 +585,7 @@ class BM300BleHelper(private val context: Context) {
             }
 
             android.util.Log.d(TAG, "Services discovered")
+            handler.post { callback?.onError("GATT: services discovered") }
 
             // Find the FFF0 service
             val service = gatt.getService(SERVICE_UUID)
@@ -590,80 +595,175 @@ class BM300BleHelper(private val context: Context) {
                 return
             }
 
+            android.util.Log.d(TAG, "Found FFF0 service")
+            handler.post { callback?.onError("GATT: found FFF0 service") }
+
             // Get characteristics
             writeCharacteristic = service.getCharacteristic(WRITE_CHAR_UUID)
             notifyCharacteristic = service.getCharacteristic(NOTIFY_CHAR_UUID)
 
             if (writeCharacteristic == null || notifyCharacteristic == null) {
-                android.util.Log.e(TAG, "Characteristics not found")
+                android.util.Log.e(TAG, "Characteristics not found: write=${writeCharacteristic != null}, notify=${notifyCharacteristic != null}")
                 handler.post { callback?.onError("BM300 characteristics not found") }
                 return
             }
 
-            // Enable notifications on FFF4
-            try {
-                gatt.setCharacteristicNotification(notifyCharacteristic, true)
+            android.util.Log.d(TAG, "Found FFF3 and FFF4 characteristics")
+            handler.post { callback?.onError("GATT: found FFF3/FFF4 chars") }
 
-                val descriptor = notifyCharacteristic!!.getDescriptor(CCCD_UUID)
-                if (descriptor != null) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                        @Suppress("DEPRECATION")
-                        gatt.writeDescriptor(descriptor)
-                    }
-                    android.util.Log.d(TAG, "Notification enabled on FFF4")
+            // Python implementation sends command FIRST, then enables notifications
+            // IMPORTANT: Command must be AES encrypted!
+            try {
+                // Step 1: Send the ENCRYPTED start command to FFF3 first (like Python does)
+                android.util.Log.d(TAG, "Step 1: Encrypting and sending start command to FFF3...")
+                val encryptedCommand = encryptAes(START_COMMAND)
+                val cmdHex = encryptedCommand.joinToString("") { "%02x".format(it) }
+                android.util.Log.d(TAG, "Encrypted command: $cmdHex")
+                handler.post { callback?.onError("GATT: writing ENCRYPTED command to FFF3") }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    gatt.writeCharacteristic(writeCharacteristic!!, encryptedCommand, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+                } else {
+                    @Suppress("DEPRECATION")
+                    writeCharacteristic!!.value = encryptedCommand
+                    @Suppress("DEPRECATION")
+                    gatt.writeCharacteristic(writeCharacteristic)
                 }
+                // onCharacteristicWrite will be called, then we enable notifications
             } catch (e: SecurityException) {
-                handler.post { callback?.onError("Permission denied for notifications") }
+                handler.post { callback?.onError("Permission denied for write: ${e.message}") }
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Error encrypting/sending command: ${e.message}")
+                handler.post { callback?.onError("Encrypt/send error: ${e.message}") }
             }
         }
 
         override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
-            if (status == BluetoothGatt.GATT_SUCCESS && descriptor.uuid == CCCD_UUID) {
-                android.util.Log.d(TAG, "Notifications enabled, sending start command")
+            android.util.Log.d(TAG, "onDescriptorWrite: status=$status, uuid=${descriptor.uuid}")
+            handler.post { callback?.onError("GATT: descriptor write status=$status") }
+
+            if (status == BluetoothGatt.GATT_SUCCESS && descriptor.uuid == CCCD_UUID && !notificationsEnabled) {
+                notificationsEnabled = true
+                android.util.Log.d(TAG, "Notifications enabled successfully!")
+                handler.post { callback?.onError("GATT: notifications enabled, waiting for data...") }
                 isConnected = true
                 handler.post { callback?.onConnected() }
 
-                // Send initial command and start periodic timer
-                sendCommand()
+                // Command was already sent before enabling notifications (like Python does)
+                // Start the periodic timer to keep sending commands
+                android.util.Log.d(TAG, "Starting command timer...")
                 startCommandTimer()
+            } else if (status != BluetoothGatt.GATT_SUCCESS) {
+                android.util.Log.e(TAG, "onDescriptorWrite FAILED: status=$status")
+                handler.post { callback?.onError("GATT: descriptor write FAILED status=$status") }
+            }
+        }
+
+        override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            android.util.Log.d(TAG, "onCharacteristicWrite: status=$status, uuid=${characteristic.uuid}")
+            handler.post { callback?.onError("GATT: char write status=$status uuid=${characteristic.uuid.toString().substring(4,8)}") }
+
+            // If this was the FFF3 write (command), enable notifications on FFF4 (but only once!)
+            if (characteristic.uuid == WRITE_CHAR_UUID && status == BluetoothGatt.GATT_SUCCESS && !notificationsEnabled) {
+                android.util.Log.d(TAG, "Initial command written, now enabling notifications on FFF4")
+                handler.post { callback?.onError("GATT: enabling notifications (first time)") }
+
+                try {
+                    gatt.setCharacteristicNotification(notifyCharacteristic, true)
+
+                    val descriptor = notifyCharacteristic!!.getDescriptor(CCCD_UUID)
+                    if (descriptor != null) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                            @Suppress("DEPRECATION")
+                            gatt.writeDescriptor(descriptor)
+                        }
+                        android.util.Log.d(TAG, "Enabling notifications on FFF4...")
+                    } else {
+                        android.util.Log.e(TAG, "CCCD descriptor not found!")
+                        handler.post { callback?.onError("GATT: CCCD descriptor not found!") }
+                    }
+                } catch (e: SecurityException) {
+                    handler.post { callback?.onError("Permission denied for notifications: ${e.message}") }
+                }
+            } else if (characteristic.uuid == WRITE_CHAR_UUID && status == BluetoothGatt.GATT_SUCCESS) {
+                // This is a periodic command write (notifications already enabled)
+                android.util.Log.d(TAG, "Periodic command written OK")
             }
         }
 
         @Deprecated("Deprecated in API 33")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+            android.util.Log.d(TAG, "onCharacteristicChanged (deprecated): uuid=${characteristic.uuid}")
+            handler.post { callback?.onError("GATT: notification received (deprecated API)") }
             if (characteristic.uuid == NOTIFY_CHAR_UUID) {
                 @Suppress("DEPRECATION")
-                processNotification(characteristic.value)
+                val data = characteristic.value
+                android.util.Log.d(TAG, "Received notification: ${data?.size ?: 0} bytes")
+                handler.post { callback?.onError("GATT: ${data?.size ?: 0} bytes received") }
+                if (data != null) {
+                    processNotification(data)
+                }
             }
         }
 
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-            if (characteristic.uuid == NOTIFY_CHAR_UUID) {
-                processNotification(value)
+            try {
+                val rawHex = value.joinToString("") { "%02x".format(it) }
+                android.util.Log.d(TAG, "onCharacteristicChanged: ${value.size} bytes: $rawHex")
+                // Combine into one callback to reduce overhead
+                handler.post { callback?.onError("NOTIFY[${value.size}]: $rawHex") }
+                if (characteristic.uuid == NOTIFY_CHAR_UUID) {
+                    processNotification(value)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "onCharacteristicChanged error: ${e.message}")
+                handler.post { callback?.onError("NOTIFY ERROR: ${e.message}") }
             }
         }
     }
 
     private fun sendCommand() {
-        val gatt = bluetoothGatt ?: return
-        val char = writeCharacteristic ?: return
+        val gatt = bluetoothGatt
+        val char = writeCharacteristic
+
+        if (gatt == null) {
+            android.util.Log.e(TAG, "sendCommand: bluetoothGatt is null!")
+            handler.post { callback?.onError("sendCommand: gatt is null!") }
+            return
+        }
+        if (char == null) {
+            android.util.Log.e(TAG, "sendCommand: writeCharacteristic is null!")
+            handler.post { callback?.onError("sendCommand: writeChar is null!") }
+            return
+        }
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                gatt.writeCharacteristic(char, START_COMMAND, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+            // IMPORTANT: The command must be AES encrypted before sending (like Python does)
+            val encryptedCommand = encryptAes(START_COMMAND)
+            val cmdHex = encryptedCommand.joinToString("") { "%02x".format(it) }
+            android.util.Log.d(TAG, "Sending ENCRYPTED command: $cmdHex")
+            handler.post { callback?.onError("sendCommand: encrypted ${encryptedCommand.size} bytes") }
+
+            val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                gatt.writeCharacteristic(char, encryptedCommand, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
             } else {
                 @Suppress("DEPRECATION")
-                char.value = START_COMMAND
+                char.value = encryptedCommand
                 @Suppress("DEPRECATION")
                 gatt.writeCharacteristic(char)
             }
-            android.util.Log.d(TAG, "Command sent")
+            android.util.Log.d(TAG, "Command write result: $result")
+            handler.post { callback?.onError("sendCommand: result=$result") }
         } catch (e: SecurityException) {
             android.util.Log.e(TAG, "Permission denied sending command: ${e.message}")
+            handler.post { callback?.onError("sendCommand: SecurityException: ${e.message}") }
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Error sending command: ${e.message}")
+            handler.post { callback?.onError("sendCommand: Exception: ${e.message}") }
         }
     }
 
@@ -688,15 +788,21 @@ class BM300BleHelper(private val context: Context) {
 
     private fun processNotification(encryptedData: ByteArray) {
         try {
+            val encHex = encryptedData.joinToString("") { "%02x".format(it) }
+            android.util.Log.d(TAG, "Encrypted data: $encHex")
+            handler.post { callback?.onError("decrypt: enc=$encHex") }
+
             // Decrypt the data
             val decrypted = decryptAes(encryptedData)
             val hexString = decrypted.joinToString("") { "%02x".format(it) }
 
             android.util.Log.d(TAG, "Decrypted: $hexString")
+            handler.post { callback?.onError("decrypt: dec=$hexString") }
 
             // Validate header
             if (!hexString.startsWith("d1550700")) {
                 android.util.Log.d(TAG, "Invalid header, ignoring")
+                handler.post { callback?.onError("decrypt: INVALID header (expected d1550700)") }
                 return
             }
 
@@ -717,11 +823,15 @@ class BM300BleHelper(private val context: Context) {
                 if (negativeTemp) temperature = -temperature
 
                 android.util.Log.d(TAG, "Parsed: Voltage=${voltage}V, SOC=$soc%, Temp=$temperature°C")
+                handler.post { callback?.onError("PARSED: ${voltage}V, $soc%, ${temperature}C") }
 
                 handler.post { callback?.onDataReceived(voltage, soc, temperature) }
+            } else {
+                handler.post { callback?.onError("decrypt: hex too short (${hexString.length} < 36)") }
             }
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Error processing notification: ${e.message}")
+            handler.post { callback?.onError("decrypt ERROR: ${e.message}") }
         }
     }
 
@@ -731,6 +841,14 @@ class BM300BleHelper(private val context: Context) {
         val ivSpec = IvParameterSpec(ByteArray(16))  // Zero IV
         cipher.init(Cipher.DECRYPT_MODE, keySpec, ivSpec)
         return cipher.doFinal(encryptedData)
+    }
+
+    private fun encryptAes(plainData: ByteArray): ByteArray {
+        val cipher = Cipher.getInstance("AES/CBC/NoPadding")
+        val keySpec = SecretKeySpec(AES_KEY, "AES")
+        val ivSpec = IvParameterSpec(ByteArray(16))  // Zero IV
+        cipher.init(Cipher.ENCRYPT_MODE, keySpec, ivSpec)
+        return cipher.doFinal(plainData)
     }
 
     fun dispose() {

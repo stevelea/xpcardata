@@ -509,23 +509,36 @@ class BM300BatteryService {
   }
 
   /// Connect to a BM300 Pro device by address
+  /// Tries flutter_blue_plus first, falls back to native if unavailable
   Future<void> connect(String address) async {
     if (_isConnected) {
       _logger.log('[BM300] Already connected');
       return;
     }
 
+    _savedDeviceAddress = address;
+
+    // Save the device address
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      await hive.saveSetting('bm300_device_address', address);
+    }
+
+    _logger.log('[BM300] Connecting to $address...');
+
+    // Try flutter_blue_plus first
+    bool fbpWorked = await _tryFlutterBluePlusConnect(address);
+
+    if (!fbpWorked) {
+      // Fall back to native connection
+      _logger.log('[BM300] flutter_blue_plus unavailable, using native connector...');
+      await _tryNativeConnect(address);
+    }
+  }
+
+  /// Try connecting with flutter_blue_plus - returns true if it worked
+  Future<bool> _tryFlutterBluePlusConnect(String address) async {
     try {
-      _savedDeviceAddress = address;
-
-      // Save the device address
-      final hive = HiveStorageService.instance;
-      if (hive.isAvailable) {
-        await hive.saveSetting('bm300_device_address', address);
-      }
-
-      _logger.log('[BM300] Connecting to $address...');
-
       // Get device by ID
       final device = BluetoothDevice.fromId(address);
       _connectedDevice = device;
@@ -558,7 +571,7 @@ class BM300BatteryService {
       if (bm300Service == null) {
         _logger.log('[BM300] Service FFF0 not found!');
         await device.disconnect();
-        return;
+        return true; // Plugin worked, just service not found
       }
 
       // Find characteristics
@@ -575,7 +588,7 @@ class BM300BatteryService {
       if (_writeChar == null || _notifyChar == null) {
         _logger.log('[BM300] Required characteristics not found!');
         await device.disconnect();
-        return;
+        return true; // Plugin worked
       }
 
       // Enable notifications
@@ -594,12 +607,40 @@ class BM300BatteryService {
       _isConnected = true;
       _connectedDeviceAddress = address;
       _connectionController.add(true);
-      _logger.log('[BM300] Fully connected and receiving data');
+      _logger.log('[BM300] Fully connected and receiving data (flutter_blue_plus)');
+      return true;
     } catch (e) {
-      _logger.log('[BM300] Connect error: $e');
+      _logger.log('[BM300] flutter_blue_plus connect error: $e');
+      _connectionSubscription?.cancel();
+      _connectionSubscription = null;
+      _connectedDevice = null;
+
+      if (e is MissingPluginException) {
+        return false; // Plugin not available - try native
+      }
+      // Other error - plugin exists but connect failed
       _isConnected = false;
       _connectedDeviceAddress = null;
-      rethrow;
+      return true; // Don't try native for other errors
+    }
+  }
+
+  /// Fallback to native BLE connection via method channel
+  Future<void> _tryNativeConnect(String address) async {
+    try {
+      _logger.log('[BM300] Starting native connection to $address...');
+
+      // The native BM300BleHelper handles connection, service discovery, and data
+      // It will send onConnected, onDisconnected, onDataReceived callbacks
+      await _channel.invokeMethod('connect', {'address': address});
+
+      // Connection is async - the callback will update _isConnected
+      _connectedDeviceAddress = address;
+      _logger.log('[BM300] Native connect initiated, waiting for callback...');
+    } catch (e) {
+      _logger.log('[BM300] Native connect error: $e');
+      _isConnected = false;
+      _connectedDeviceAddress = null;
     }
   }
 
@@ -724,13 +765,25 @@ class BM300BatteryService {
       _connectionSubscription?.cancel();
       _connectionSubscription = null;
 
-      await _connectedDevice?.disconnect();
-      _connectedDevice = null;
+      // Disconnect from flutter_blue_plus if connected
+      if (_connectedDevice != null) {
+        await _connectedDevice!.disconnect();
+        _connectedDevice = null;
+      }
+
+      // Also try native disconnect
+      try {
+        await _channel.invokeMethod('disconnect');
+      } catch (e) {
+        // Ignore native disconnect errors
+      }
+
       _writeChar = null;
       _notifyChar = null;
 
       _isConnected = false;
       _connectedDeviceAddress = null;
+      _connectionController.add(false);
       _logger.log('[BM300] Disconnected');
     } catch (e) {
       _logger.log('[BM300] Disconnect error: $e');
