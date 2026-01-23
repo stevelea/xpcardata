@@ -413,10 +413,13 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
   }
 
   Future<void> _showGitHubTokenDialog() async {
-    final controller = TextEditingController();
-
     // Load existing token
     await GitHubUpdateService.instance.loadGitHubToken();
+
+    // Pre-populate controller with existing token
+    final controller = TextEditingController(
+      text: GitHubUpdateService.instance.githubToken ?? '',
+    );
 
     if (!mounted) return;
 
