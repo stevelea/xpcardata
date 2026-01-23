@@ -173,28 +173,40 @@ class BM300BleHelper(private val context: Context) {
         reportedBM300Devices.clear()  // Clear previously reported BM300 devices
         scanDeviceCount = 0  // Reset device counter
 
-        // Use BALANCED mode - works better on some devices like OnePlus
+        // Try LOW_POWER mode which is more compatible
         val scanSettings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
-            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
-            .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
-            .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
-            .setReportDelay(0)
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
             .build()
 
-        // Use empty filter list instead of null - some devices require this
-        val scanFilters = listOf<ScanFilter>()
-
-        android.util.Log.d(TAG, "Calling scanner.startScan() with BALANCED mode...")
+        android.util.Log.d(TAG, "Calling scanner.startScan() with LOW_POWER mode, null filters...")
         try {
-            scanner.startScan(scanFilters, scanSettings, scanCallback)
+            // Use null for filters - most compatible option
+            scanner.startScan(null, scanSettings, scanCallback)
             android.util.Log.d(TAG, "scanner.startScan() completed successfully")
+
+            // Also try to trigger a scan callback test by logging adapter info
+            android.util.Log.d(TAG, "Adapter state after startScan: ${bluetoothAdapter?.state}, scanning=${bluetoothAdapter?.isDiscovering}")
         } catch (e: Exception) {
             android.util.Log.e(TAG, "scanner.startScan() FAILED: ${e.message}")
             callback?.onError("BLE scan start failed: ${e.message}")
             isScanning = false
             return
         }
+
+        // Log progress every 5 seconds
+        val progressRunnable = object : Runnable {
+            var count = 0
+            override fun run() {
+                if (isScanning) {
+                    count++
+                    android.util.Log.d(TAG, "Scan in progress (${count * 5}s): ${seenDevices.size} devices found so far, $scanDeviceCount callbacks")
+                    if (count < (timeoutMs / 5000).toInt()) {
+                        handler.postDelayed(this, 5000)
+                    }
+                }
+            }
+        }
+        handler.postDelayed(progressRunnable, 5000)
 
         // Stop scan after timeout
         handler.postDelayed({
