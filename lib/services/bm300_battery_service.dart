@@ -221,7 +221,8 @@ class BM300BatteryService {
   }
 
   /// Start scanning for BM300 Pro devices
-  Future<void> startScan({int timeoutMs = 10000}) async {
+  /// Default timeout is 60 seconds - classic Bluetooth discovery needs time
+  Future<void> startScan({int timeoutMs = 60000}) async {
     if (_isScanning) return;
 
     try {

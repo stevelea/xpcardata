@@ -148,10 +148,11 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
     });
 
     try {
-      await _bm300Service.startScan(timeoutMs: 15000);
+      // Scan for 60 seconds - classic Bluetooth discovery needs time
+      await _bm300Service.startScan(timeoutMs: 60000);
 
       // Auto-stop scanning state after timeout
-      Future.delayed(const Duration(seconds: 15), () {
+      Future.delayed(const Duration(seconds: 60), () {
         if (mounted && _bm300Scanning) {
           setState(() => _bm300Scanning = false);
         }
