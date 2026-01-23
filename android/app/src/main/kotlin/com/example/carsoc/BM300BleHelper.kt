@@ -172,10 +172,24 @@ class BM300BleHelper(private val context: Context) {
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             try {
-                val deviceName = result.device.name ?: return
-                if (deviceName == DEVICE_NAME) {
-                    android.util.Log.d(TAG, "Found $DEVICE_NAME: ${result.device.address}")
-                    callback?.onDeviceFound(deviceName, result.device.address)
+                val deviceName = result.device.name
+                val deviceAddress = result.device.address
+
+                // Check if this looks like a BM300 Pro device:
+                // 1. Named exactly "BM300 Pro"
+                // 2. Name is a 12-character hex string (serial number like "3CAB72B2A9C0")
+                // 3. Name contains "BM" prefix
+                val isBM300 = when {
+                    deviceName == null -> false
+                    deviceName == DEVICE_NAME -> true
+                    deviceName.matches(Regex("^[0-9A-Fa-f]{12}$")) -> true  // 12 hex chars (serial number)
+                    deviceName.startsWith("BM") -> true  // BM prefix variations
+                    else -> false
+                }
+
+                if (isBM300) {
+                    android.util.Log.d(TAG, "Found BM300 device: $deviceName ($deviceAddress)")
+                    callback?.onDeviceFound(deviceName ?: "BM300", deviceAddress)
                 }
             } catch (e: SecurityException) {
                 android.util.Log.e(TAG, "Security exception in scan callback: ${e.message}")
