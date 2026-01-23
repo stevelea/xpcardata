@@ -41,10 +41,11 @@ class MainActivity : FlutterActivity() {
         bluetoothHelper = BluetoothHelper(applicationContext, this)
         // Initialize LocationHelper
         locationHelper = LocationHelper(applicationContext)
-        // Initialize BM300 BLE Helper (with error handling for devices without BLE)
+        // Initialize BM300 BLE Helper with Activity context (required for BLE scan callbacks)
+        // Using 'this' (Activity) instead of applicationContext for proper BLE callback delivery
         try {
-            bm300Helper = BM300BleHelper(applicationContext)
-            android.util.Log.d("MainActivity", "BM300BleHelper initialized")
+            bm300Helper = BM300BleHelper(this)
+            android.util.Log.d("MainActivity", "BM300BleHelper initialized with Activity context")
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Failed to initialize BM300BleHelper: ${e.message}")
             bm300Helper = null

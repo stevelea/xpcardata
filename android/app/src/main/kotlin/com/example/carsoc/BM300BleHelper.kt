@@ -58,6 +58,10 @@ class BM300BleHelper(private val context: Context) {
             }
             return data
         }
+
+        // Singleton scanner reference - needed because Android can only have one active scanner
+        private var activeScanner: BluetoothLeScanner? = null
+        private var activeScanCallback: ScanCallback? = null
     }
 
     // Callback interface
@@ -165,48 +169,70 @@ class BM300BleHelper(private val context: Context) {
             return
         }
 
+        // Stop any previously active scan first (Android only allows one scan at a time)
+        try {
+            activeScanCallback?.let { oldCallback ->
+                activeScanner?.stopScan(oldCallback)
+                android.util.Log.d(TAG, "Stopped previous scan before starting new one")
+            }
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Error stopping previous scan: ${e.message}")
+        }
+
         android.util.Log.d(TAG, "Starting BLE scan for BM300 devices (service UUID: $SERVICE_UUID)")
         android.util.Log.d(TAG, "BLE adapter: ${bluetoothAdapter?.name}, state: ${bluetoothAdapter?.state}")
         android.util.Log.d(TAG, "Scanner object: $scanner")
+        android.util.Log.d(TAG, "Context type: ${context.javaClass.simpleName}")
         isScanning = true
         seenDevices.clear()  // Clear previously seen devices
         reportedBM300Devices.clear()  // Clear previously reported BM300 devices
         scanDeviceCount = 0  // Reset device counter
 
-        // Try LOW_POWER mode which is more compatible
+        // Use LOW_LATENCY mode - most aggressive scanning, finds devices fastest
+        // Also set MATCH_MODE_AGGRESSIVE and CALLBACK_TYPE_ALL_MATCHES for maximum device discovery
         val scanSettings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+            .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
+            .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
+            .setReportDelay(0) // Immediate callbacks
             .build()
 
-        android.util.Log.d(TAG, "Calling scanner.startScan() with LOW_POWER mode, null filters...")
+        android.util.Log.d(TAG, "Calling scanner.startScan() with LOW_LATENCY mode, AGGRESSIVE match, null filters...")
         try {
+            // Store references for cleanup
+            activeScanner = scanner
+            activeScanCallback = scanCallback
+
             // Use null for filters - most compatible option
             scanner.startScan(null, scanSettings, scanCallback)
             android.util.Log.d(TAG, "scanner.startScan() completed successfully")
 
-            // Also try to trigger a scan callback test by logging adapter info
-            android.util.Log.d(TAG, "Adapter state after startScan: ${bluetoothAdapter?.state}, scanning=${bluetoothAdapter?.isDiscovering}")
+            // Check Bluetooth adapter scanning state
+            android.util.Log.d(TAG, "Adapter state after startScan: enabled=${bluetoothAdapter?.isEnabled}, discovering=${bluetoothAdapter?.isDiscovering}")
         } catch (e: Exception) {
             android.util.Log.e(TAG, "scanner.startScan() FAILED: ${e.message}")
             callback?.onError("BLE scan start failed: ${e.message}")
             isScanning = false
+            activeScanner = null
+            activeScanCallback = null
             return
         }
 
-        // Log progress every 5 seconds
+        // Log progress every 3 seconds (more frequent for debugging)
         val progressRunnable = object : Runnable {
             var count = 0
             override fun run() {
                 if (isScanning) {
                     count++
-                    android.util.Log.d(TAG, "Scan in progress (${count * 5}s): ${seenDevices.size} devices found so far, $scanDeviceCount callbacks")
-                    if (count < (timeoutMs / 5000).toInt()) {
-                        handler.postDelayed(this, 5000)
+                    android.util.Log.d(TAG, "Scan progress (${count * 3}s): ${seenDevices.size} unique devices, $scanDeviceCount callbacks received")
+                    if (count < (timeoutMs / 3000).toInt()) {
+                        handler.postDelayed(this, 3000)
                     }
                 }
             }
         }
-        handler.postDelayed(progressRunnable, 5000)
+        handler.postDelayed(progressRunnable, 3000)
 
         // Stop scan after timeout
         handler.postDelayed({
@@ -219,7 +245,10 @@ class BM300BleHelper(private val context: Context) {
         if (!isScanning) return
 
         try {
-            bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
+            // Use the stored scanner and callback references
+            activeScanCallback?.let { cb ->
+                activeScanner?.stopScan(cb)
+            }
             isScanning = false
             val devicesFound = seenDevices.size
             val totalCalls = scanDeviceCount
@@ -227,6 +256,9 @@ class BM300BleHelper(private val context: Context) {
             callback?.onScanStopped(devicesFound, totalCalls)
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Error stopping scan: ${e.message}")
+        } finally {
+            activeScanner = null
+            activeScanCallback = null
         }
     }
 
@@ -239,9 +271,16 @@ class BM300BleHelper(private val context: Context) {
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             scanDeviceCount++
+
+            // Log first callback to confirm scanning is working
+            if (scanDeviceCount == 1) {
+                android.util.Log.d(TAG, "*** FIRST BLE CALLBACK RECEIVED! Scanner is working ***")
+            }
+
             try {
                 val deviceName = result.device.name
                 val deviceAddress = result.device.address
+                val rssi = result.rssi
                 val scanRecord = result.scanRecord
 
                 // Check if device advertises FFF0 service UUID
@@ -253,7 +292,7 @@ class BM300BleHelper(private val context: Context) {
                 if (isNewDevice) {
                     seenDevices.add(deviceAddress)
                     val servicesStr = serviceUuids?.joinToString(",") { it.uuid.toString().substring(4, 8) } ?: "none"
-                    android.util.Log.d(TAG, "BLE #${seenDevices.size}: name='$deviceName' addr=$deviceAddress services=[$servicesStr] hasFFF0=$hasFFF0Service")
+                    android.util.Log.d(TAG, "BLE #${seenDevices.size}: name='$deviceName' addr=$deviceAddress rssi=$rssi services=[$servicesStr] hasFFF0=$hasFFF0Service")
                 }
 
                 // Check if this looks like a BM300 Pro device:
@@ -277,7 +316,7 @@ class BM300BleHelper(private val context: Context) {
                 if (isBM300 && !reportedBM300Devices.contains(deviceAddress)) {
                     reportedBM300Devices.add(deviceAddress)
                     val displayName = deviceName ?: if (hasFFF0Service) "BM Battery Monitor" else "BM300"
-                    android.util.Log.d(TAG, "*** MATCH! BM300 device: $displayName ($deviceAddress) hasFFF0=$hasFFF0Service ***")
+                    android.util.Log.d(TAG, "*** MATCH! BM300 device: $displayName ($deviceAddress) rssi=$rssi hasFFF0=$hasFFF0Service ***")
                     callback?.onDeviceFound(displayName, deviceAddress)
                 }
             } catch (e: SecurityException) {
@@ -285,10 +324,28 @@ class BM300BleHelper(private val context: Context) {
             }
         }
 
+        override fun onBatchScanResults(results: MutableList<ScanResult>) {
+            android.util.Log.d(TAG, "Batch scan results: ${results.size} devices")
+            for (result in results) {
+                onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, result)
+            }
+        }
+
         override fun onScanFailed(errorCode: Int) {
-            android.util.Log.e(TAG, "Scan failed with error: $errorCode")
+            val errorName = when (errorCode) {
+                SCAN_FAILED_ALREADY_STARTED -> "ALREADY_STARTED"
+                SCAN_FAILED_APPLICATION_REGISTRATION_FAILED -> "APP_REGISTRATION_FAILED"
+                SCAN_FAILED_INTERNAL_ERROR -> "INTERNAL_ERROR"
+                SCAN_FAILED_FEATURE_UNSUPPORTED -> "FEATURE_UNSUPPORTED"
+                5 -> "OUT_OF_HARDWARE_RESOURCES"
+                6 -> "SCANNING_TOO_FREQUENTLY"
+                else -> "UNKNOWN($errorCode)"
+            }
+            android.util.Log.e(TAG, "Scan failed: $errorName (code $errorCode)")
             isScanning = false
-            callback?.onError("BLE scan failed: $errorCode")
+            activeScanner = null
+            activeScanCallback = null
+            callback?.onError("BLE scan failed: $errorName")
         }
     }
 
