@@ -182,6 +182,10 @@ class BM300BleHelper(private val context: Context) {
         reportedBM300Devices.clear()
         scanDeviceCount = 0
 
+        // Send test callback immediately to verify callback mechanism works
+        callback?.onDeviceFound("TEST_DEVICE", "00:00:00:00:00:00")
+        android.util.Log.d(TAG, "Sent TEST_DEVICE callback to verify mechanism")
+
         // Start classic Bluetooth discovery FIRST (works on more devices including AI boxes)
         startClassicDiscovery()
 
