@@ -130,10 +130,70 @@ class BM300BatteryService {
     }
   }
 
-  /// Handle method calls from native code (backwards compatibility)
+  /// Handle method calls from native code (device discovery, connection events, data)
   Future<dynamic> _handleMethodCall(MethodCall call) async {
-    // Keep for backwards compatibility but now using flutter_blue_plus
     _logger.log('[BM300] Native callback: ${call.method}');
+
+    switch (call.method) {
+      case 'onDeviceFound':
+        final args = call.arguments as Map<Object?, Object?>?;
+        if (args != null) {
+          final name = args['name']?.toString() ?? 'BM300';
+          final address = args['address']?.toString() ?? '';
+          _logger.log('[BM300] Native found device: $name ($address)');
+          _deviceFoundController.add({
+            'name': name,
+            'address': address,
+          });
+        }
+        break;
+
+      case 'onScanStopped':
+        final args = call.arguments as Map<Object?, Object?>?;
+        final devicesFound = args?['devicesFound'] as int? ?? 0;
+        final totalCallbacks = args?['totalCallbacks'] as int? ?? 0;
+        _logger.log('[BM300] Native scan stopped: $devicesFound devices, $totalCallbacks callbacks');
+        _isScanning = false;
+        break;
+
+      case 'onConnected':
+        _logger.log('[BM300] Native: connected');
+        _isConnected = true;
+        _connectionController.add(true);
+        break;
+
+      case 'onDisconnected':
+        _logger.log('[BM300] Native: disconnected');
+        _isConnected = false;
+        _connectedDeviceAddress = null;
+        _connectionController.add(false);
+        break;
+
+      case 'onDataReceived':
+        final args = call.arguments as Map<Object?, Object?>?;
+        if (args != null) {
+          final voltage = (args['voltage'] as num?)?.toDouble() ?? 0.0;
+          final soc = (args['soc'] as num?)?.toInt() ?? 0;
+          final temperature = (args['temperature'] as num?)?.toInt() ?? 0;
+
+          final batteryData = BM300BatteryData(
+            voltage: voltage,
+            soc: soc,
+            temperature: temperature,
+          );
+
+          _lastData = batteryData;
+          _dataController.add(batteryData);
+          _logger.log('[BM300] Native data: $batteryData');
+        }
+        break;
+
+      case 'onError':
+        final args = call.arguments as Map<Object?, Object?>?;
+        final message = args?['message']?.toString() ?? 'Unknown error';
+        _logger.log('[BM300] Native error: $message');
+        break;
+    }
   }
 
   /// Check if Bluetooth permissions are granted
@@ -148,18 +208,33 @@ class BM300BatteryService {
   }
 
   /// Check if Bluetooth is enabled
+  /// Returns true unless we can definitively confirm Bluetooth is OFF
   Future<bool> isBluetoothEnabled() async {
     try {
+      // Try to get current adapter state with a short timeout
+      // Many devices/emulators hang on this or return incorrect states
       final state = await FlutterBluePlus.adapterState.first.timeout(
-        const Duration(seconds: 3),
-        onTimeout: () => BluetoothAdapterState.on, // Assume on if timeout
+        const Duration(seconds: 2),
+        onTimeout: () {
+          _logger.log('[BM300] Bluetooth state check timed out - assuming enabled');
+          return BluetoothAdapterState.on;
+        },
       );
+
       _logger.log('[BM300] Bluetooth adapter state: $state');
-      // Return true unless we know for sure it's off
-      return state != BluetoothAdapterState.off;
+
+      // Only return false if we KNOW for certain Bluetooth is off
+      // All other states (on, unknown, unavailable, turningOn, turningOff) = proceed with scan
+      if (state == BluetoothAdapterState.off) {
+        _logger.log('[BM300] Bluetooth is definitely OFF');
+        return false;
+      }
+
+      return true;
     } catch (e) {
-      _logger.log('[BM300] Error checking Bluetooth: $e - assuming enabled');
-      return true; // Assume enabled on error (let scan fail if not)
+      // On any error, assume Bluetooth is enabled and let the scan fail naturally if not
+      _logger.log('[BM300] Bluetooth state check error: $e - assuming enabled');
+      return true;
     }
   }
 
@@ -195,38 +270,47 @@ class BM300BatteryService {
     }
   }
 
-  /// Start scanning for BM300 Pro devices using flutter_blue_plus
+  /// Start scanning for BM300 Pro devices
+  /// Tries flutter_blue_plus first, falls back to native method channel if unavailable
   Future<void> startScan({int timeoutMs = 60000}) async {
     if (_isScanning) return;
 
+    _isScanning = true;
+    _logger.log('[BM300] Starting BLE scan (timeout: ${timeoutMs / 1000}s)...');
+
+    // Try flutter_blue_plus first
+    bool fbpWorking = await _tryFlutterBluePlusScan(timeoutMs);
+
+    if (!fbpWorking) {
+      // Fall back to native scanning
+      _logger.log('[BM300] flutter_blue_plus unavailable, using native scanner...');
+      await _tryNativeScan(timeoutMs);
+    }
+
+    _isScanning = false;
+  }
+
+  /// Try scanning with flutter_blue_plus - returns true if it worked
+  Future<bool> _tryFlutterBluePlusScan(int timeoutMs) async {
     try {
-      _isScanning = true;
-
-      // Check Bluetooth state with timeout (some devices hang on this)
-      BluetoothAdapterState btState = BluetoothAdapterState.unknown;
+      // Test if flutter_blue_plus is available by checking adapter state
       try {
-        btState = await FlutterBluePlus.adapterState.first.timeout(
-          const Duration(seconds: 3),
-          onTimeout: () => BluetoothAdapterState.on, // Assume on if timeout
+        await FlutterBluePlus.adapterState.first.timeout(
+          const Duration(seconds: 2),
+          onTimeout: () => BluetoothAdapterState.on,
         );
-        _logger.log('[BM300] Bluetooth state: $btState');
       } catch (e) {
-        _logger.log('[BM300] Bluetooth state check failed: $e - assuming enabled');
-        btState = BluetoothAdapterState.on; // Assume enabled and try anyway
+        if (e is MissingPluginException) {
+          _logger.log('[BM300] flutter_blue_plus not available: $e');
+          return false;
+        }
+        // Other errors - continue, might still work
       }
-
-      if (btState == BluetoothAdapterState.off) {
-        _logger.log('[BM300] Bluetooth is OFF - cannot scan');
-        _isScanning = false;
-        return;
-      }
-
-      // Proceed with scan even if state is unknown/unavailable (try anyway on AI boxes)
-      _logger.log('[BM300] Starting flutter_blue_plus scan (timeout: ${timeoutMs}ms)...');
 
       // Track seen devices
       final seenDevices = <String>{};
       int deviceCount = 0;
+      bool scanStarted = false;
 
       // Listen to scan results
       _scanSubscription = FlutterBluePlus.onScanResults.listen((results) {
@@ -271,15 +355,25 @@ class BM300BatteryService {
           timeout: Duration(milliseconds: timeoutMs),
           androidUsesFineLocation: true,
         );
-        _logger.log('[BM300] Scan started successfully');
+        scanStarted = true;
+        _logger.log('[BM300] flutter_blue_plus scan started');
       } catch (e) {
         _logger.log('[BM300] FlutterBluePlus.startScan failed: $e');
-        // Don't rethrow - let the scan timeout handle cleanup
+        await _scanSubscription?.cancel();
+        _scanSubscription = null;
+        if (e is MissingPluginException) {
+          return false; // Not available - try native
+        }
+        // Other errors - scan failed but plugin might be working
+      }
+
+      if (!scanStarted) {
+        return false;
       }
 
       // Log progress every 10 seconds
       int progressCount = 0;
-      Timer.periodic(const Duration(seconds: 10), (timer) {
+      final progressTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
         if (!_isScanning) {
           timer.cancel();
           return;
@@ -294,14 +388,62 @@ class BM300BatteryService {
       // Wait for scan to complete
       await Future.delayed(Duration(milliseconds: timeoutMs + 1000));
 
-      _isScanning = false;
+      progressTimer.cancel();
       await _scanSubscription?.cancel();
       _scanSubscription = null;
-      _logger.log('[BM300] Scan completed: ${seenDevices.length} devices found');
+      _logger.log('[BM300] flutter_blue_plus scan completed: ${seenDevices.length} devices found');
+      return true;
     } catch (e) {
-      _isScanning = false;
-      _logger.log('[BM300] Scan error: $e');
-      rethrow;
+      _logger.log('[BM300] flutter_blue_plus scan error: $e');
+      await _scanSubscription?.cancel();
+      _scanSubscription = null;
+      if (e is MissingPluginException) {
+        return false;
+      }
+      return true; // Plugin exists but scan failed
+    }
+  }
+
+  /// Fallback to native BLE scanning via method channel
+  Future<void> _tryNativeScan(int timeoutMs) async {
+    try {
+      _logger.log('[BM300] Starting native BLE scan (${timeoutMs / 1000}s)...');
+
+      // Start native scan - pass 'timeout' as expected by native code
+      await _channel.invokeMethod('startScan', {'timeout': timeoutMs});
+      _logger.log('[BM300] Native scan started');
+
+      // Log progress every 10 seconds
+      int progressCount = 0;
+      final progressTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+        if (!_isScanning) {
+          timer.cancel();
+          return;
+        }
+        progressCount++;
+        _logger.log('[BM300] Native scan progress (${progressCount * 10}s)...');
+        if (progressCount * 10000 >= timeoutMs) {
+          timer.cancel();
+        }
+      });
+
+      // Wait for scan to complete (native handles the timeout, but we need to keep isScanning true)
+      await Future.delayed(Duration(milliseconds: timeoutMs + 2000));
+
+      progressTimer.cancel();
+
+      // Native scan should have stopped itself via timeout, but ensure we stop scanning state
+      if (_isScanning) {
+        try {
+          await _channel.invokeMethod('stopScan');
+        } catch (e) {
+          // Ignore stop errors
+        }
+      }
+
+      _logger.log('[BM300] Native scan completed');
+    } catch (e) {
+      _logger.log('[BM300] Native scan error: $e');
     }
   }
 
