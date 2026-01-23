@@ -93,12 +93,20 @@ class BM300BleHelper(private val context: Context) {
     }
 
     fun hasPermissions(): Boolean {
+        // BLE scanning requires location permission on all Android versions for finding new devices
+        val hasLocation = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+            // Android 12+: Need BLUETOOTH_CONNECT, BLUETOOTH_SCAN, and location
+            val hasBtConnect = ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+            val hasBtScan = ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+            android.util.Log.d(TAG, "Permissions: BT_CONNECT=$hasBtConnect, BT_SCAN=$hasBtScan, LOCATION=$hasLocation")
+            hasBtConnect && hasBtScan && hasLocation
         } else {
-            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            // Android 11 and below
+            val hasBt = ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED
+            android.util.Log.d(TAG, "Permissions: BLUETOOTH=$hasBt, LOCATION=$hasLocation")
+            hasBt && hasLocation
         }
     }
 
