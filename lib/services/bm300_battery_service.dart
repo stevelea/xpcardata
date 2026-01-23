@@ -407,6 +407,24 @@ class BM300BatteryService {
   /// Fallback to native BLE scanning via method channel
   Future<void> _tryNativeScan(int timeoutMs) async {
     try {
+      // Check native Bluetooth and location status first
+      try {
+        final hasPerms = await _channel.invokeMethod<bool>('hasPermissions') ?? false;
+        final btEnabled = await _channel.invokeMethod<bool>('isBluetoothEnabled') ?? false;
+        final locEnabled = await _channel.invokeMethod<bool>('isLocationEnabled') ?? false;
+        _logger.log('[BM300] Native status: permissions=$hasPerms, bluetooth=$btEnabled, location=$locEnabled');
+
+        if (!btEnabled) {
+          _logger.log('[BM300] Native: Bluetooth not enabled!');
+          return;
+        }
+        if (!locEnabled) {
+          _logger.log('[BM300] Native: Location disabled - BLE scan may fail!');
+        }
+      } catch (e) {
+        _logger.log('[BM300] Native status check failed: $e');
+      }
+
       _logger.log('[BM300] Starting native BLE scan (${timeoutMs / 1000}s)...');
 
       // Start native scan - pass 'timeout' as expected by native code

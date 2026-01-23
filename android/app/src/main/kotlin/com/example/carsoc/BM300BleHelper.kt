@@ -239,9 +239,13 @@ class BM300BleHelper(private val context: Context) {
                                 if (isNewDevice) {
                                     seenDevices.add(deviceAddress)
                                     android.util.Log.d(TAG, "Classic #${seenDevices.size}: name='$deviceName' addr=$deviceAddress rssi=$rssi")
+
+                                    // DEBUG MODE: Report ALL devices to Flutter
+                                    val displayName = deviceName ?: "Unknown (${deviceAddress.takeLast(5)})"
+                                    callback?.onDeviceFound(displayName, deviceAddress)
                                 }
 
-                                // Check if this looks like a BM300 device
+                                // Also check if this looks like a BM300 device for logging
                                 val isBM300 = when {
                                     deviceName == null -> false
                                     deviceName == DEVICE_NAME -> true
@@ -255,9 +259,7 @@ class BM300BleHelper(private val context: Context) {
 
                                 if (isBM300 && !reportedBM300Devices.contains(deviceAddress)) {
                                     reportedBM300Devices.add(deviceAddress)
-                                    val displayName = deviceName ?: "BM300"
-                                    android.util.Log.d(TAG, "*** CLASSIC MATCH! BM300 device: $displayName ($deviceAddress) rssi=$rssi ***")
-                                    callback?.onDeviceFound(displayName, deviceAddress)
+                                    android.util.Log.d(TAG, "*** CLASSIC MATCH! BM300 device: $deviceName ($deviceAddress) rssi=$rssi ***")
                                 }
                             } catch (e: SecurityException) {
                                 android.util.Log.e(TAG, "Security exception in classic discovery: ${e.message}")
@@ -427,7 +429,14 @@ class BM300BleHelper(private val context: Context) {
                     android.util.Log.d(TAG, "BLE #${seenDevices.size}: name='$deviceName' addr=$deviceAddress rssi=$rssi services=[$servicesStr] hasFFF0=$hasFFF0Service")
                 }
 
-                // Check if this looks like a BM300 Pro device:
+                // DEBUG MODE: Report ALL devices to Flutter for debugging
+                // This helps identify what the BM300 advertises as
+                if (isNewDevice) {
+                    val displayName = deviceName ?: "Unknown (${deviceAddress.takeLast(5)})"
+                    callback?.onDeviceFound(displayName, deviceAddress)
+                }
+
+                // Also check if this looks like a BM300 Pro device for logging:
                 // 1. Device advertises FFF0 service UUID (most reliable)
                 // 2. Named exactly "BM300 Pro"
                 // 3. Name is a 12-character hex string (serial number like "3CAB72B2A9C0")
@@ -447,9 +456,7 @@ class BM300BleHelper(private val context: Context) {
 
                 if (isBM300 && !reportedBM300Devices.contains(deviceAddress)) {
                     reportedBM300Devices.add(deviceAddress)
-                    val displayName = deviceName ?: if (hasFFF0Service) "BM Battery Monitor" else "BM300"
-                    android.util.Log.d(TAG, "*** MATCH! BM300 device: $displayName ($deviceAddress) rssi=$rssi hasFFF0=$hasFFF0Service ***")
-                    callback?.onDeviceFound(displayName, deviceAddress)
+                    android.util.Log.d(TAG, "*** MATCH! BM300 device: $deviceName ($deviceAddress) rssi=$rssi hasFFF0=$hasFFF0Service ***")
                 }
             } catch (e: SecurityException) {
                 android.util.Log.e(TAG, "Security exception in scan callback: ${e.message}")
