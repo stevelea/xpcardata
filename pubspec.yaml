@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.3.59
+version: 1.3.60
 
 environment:
   sdk: ^3.10.4
@@ -47,6 +47,10 @@ dependencies:
   # Vehicle Data Sources
   flutter_automotive: ^0.1.0                    # Primary: Android Car API access
   # Using native Bluetooth via Method Channel (works on Android 4.4-15+)
+
+  # BLE for BM300 battery monitor
+  flutter_blue_plus: ^1.35.2                    # BLE scanning and connection
+  pointycastle: ^3.9.1                          # AES decryption for BM300 data
 
   # MQTT
   mqtt_client: ^10.2.0
