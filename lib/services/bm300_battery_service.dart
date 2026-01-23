@@ -427,11 +427,19 @@ class BM300BatteryService {
 
       _logger.log('[BM300] Starting native BLE scan (${timeoutMs / 1000}s)...');
 
-      // First test if callback works by calling testCallback
+      // Check if callback is set in BM300BleHelper
       try {
-        _logger.log('[BM300] Testing callback mechanism...');
+        final hasCallback = await _channel.invokeMethod<bool>('hasCallback') ?? false;
+        _logger.log('[BM300] BM300BleHelper hasCallback: $hasCallback');
+      } catch (e) {
+        _logger.log('[BM300] hasCallback check failed: $e');
+      }
+
+      // Test direct invokeMethod from MainActivity
+      try {
+        _logger.log('[BM300] Testing direct invokeMethod...');
         await _channel.invokeMethod('testCallback');
-        _logger.log('[BM300] testCallback completed - check if CALLBACK_TEST device appeared');
+        _logger.log('[BM300] testCallback completed - CALLBACK_TEST should appear');
       } catch (e) {
         _logger.log('[BM300] testCallback failed: $e');
       }

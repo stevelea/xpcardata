@@ -104,6 +104,13 @@ class BM300BleHelper(private val context: Context) {
 
     fun setCallback(callback: BM300Callback) {
         this.callback = callback
+        android.util.Log.d(TAG, "Callback SET: ${callback.hashCode()}")
+    }
+
+    fun hasCallback(): Boolean {
+        val hasIt = callback != null
+        android.util.Log.d(TAG, "hasCallback: $hasIt")
+        return hasIt
     }
 
     fun hasPermissions(): Boolean {

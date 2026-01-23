@@ -527,6 +527,10 @@ class MainActivity : FlutterActivity() {
                         result.error("CALLBACK_FAILED", e.message, null)
                     }
                 }
+                "hasCallback" -> {
+                    val hasIt = helper.hasCallback()
+                    result.success(hasIt)
+                }
                 "stopScan" -> {
                     try {
                         helper.stopScan()
