@@ -68,24 +68,38 @@ class BM300BatteryService {
   Future<void> initialize() async {
     _logger.log('[BM300] Initializing...');
 
-    // Load saved settings
-    final hive = HiveStorageService.instance;
-    if (hive.isAvailable) {
-      _isEnabled = hive.getSetting<bool>('bm300_enabled') ?? false;
-      _savedDeviceAddress = hive.getSetting<String>('bm300_device_address');
-    }
+    try {
+      // Load saved settings
+      final hive = HiveStorageService.instance;
+      if (hive.isAvailable) {
+        _isEnabled = hive.getSetting<bool>('bm300_enabled') ?? false;
+        _savedDeviceAddress = hive.getSetting<String>('bm300_device_address');
+      }
 
-    // Set up method channel handler for callbacks from native
-    _channel.setMethodCallHandler(_handleMethodCall);
+      // Set up method channel handler for callbacks from native
+      _channel.setMethodCallHandler(_handleMethodCall);
 
-    _logger.log(
-        '[BM300] Initialized: enabled=$_isEnabled, savedDevice=$_savedDeviceAddress');
+      _logger.log(
+          '[BM300] Initialized: enabled=$_isEnabled, savedDevice=$_savedDeviceAddress');
 
-    // Auto-connect if enabled and device was previously connected
-    if (_isEnabled && _savedDeviceAddress != null) {
-      _logger.log('[BM300] Auto-connecting to saved device...');
-      await Future.delayed(const Duration(seconds: 2));
-      await connect(_savedDeviceAddress!);
+      // Auto-connect if enabled and device was previously connected
+      // Do this in a non-blocking way to prevent startup crashes
+      if (_isEnabled && _savedDeviceAddress != null) {
+        _logger.log('[BM300] Scheduling auto-connect to saved device...');
+        // Use a longer delay and wrap in try-catch to ensure app doesn't crash
+        Future.delayed(const Duration(seconds: 5), () async {
+          try {
+            if (_isEnabled && _savedDeviceAddress != null && !_isConnected) {
+              _logger.log('[BM300] Auto-connecting to $_savedDeviceAddress...');
+              await connect(_savedDeviceAddress!);
+            }
+          } catch (e) {
+            _logger.log('[BM300] Auto-connect failed: $e');
+          }
+        });
+      }
+    } catch (e) {
+      _logger.log('[BM300] Initialization error: $e');
     }
   }
 

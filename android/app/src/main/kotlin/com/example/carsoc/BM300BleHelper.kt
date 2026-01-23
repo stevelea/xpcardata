@@ -69,8 +69,13 @@ class BM300BleHelper(private val context: Context) {
         fun onError(message: String)
     }
 
-    private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-    private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
+    private val bluetoothManager: BluetoothManager? = try {
+        context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+    } catch (e: Exception) {
+        android.util.Log.e(TAG, "Failed to get BluetoothManager: ${e.message}")
+        null
+    }
+    private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
     private var bluetoothGatt: BluetoothGatt? = null
     private var writeCharacteristic: BluetoothGattCharacteristic? = null
     private var notifyCharacteristic: BluetoothGattCharacteristic? = null
@@ -97,7 +102,10 @@ class BM300BleHelper(private val context: Context) {
         }
     }
 
-    fun isBluetoothEnabled(): Boolean = bluetoothAdapter?.isEnabled ?: false
+    fun isBluetoothEnabled(): Boolean {
+        if (bluetoothManager == null) return false
+        return bluetoothAdapter?.isEnabled ?: false
+    }
 
     fun isConnected(): Boolean = isConnected
 
@@ -108,6 +116,11 @@ class BM300BleHelper(private val context: Context) {
     fun startScan(timeoutMs: Long = 10000) {
         if (!hasPermissions()) {
             callback?.onError("Bluetooth permissions not granted")
+            return
+        }
+
+        if (bluetoothManager == null) {
+            callback?.onError("Bluetooth not available on this device")
             return
         }
 
@@ -186,9 +199,14 @@ class BM300BleHelper(private val context: Context) {
             return
         }
 
+        if (bluetoothManager == null || bluetoothAdapter == null) {
+            callback?.onError("Bluetooth not available")
+            return
+        }
+
         stopScan()
 
-        val device = bluetoothAdapter?.getRemoteDevice(address)
+        val device = bluetoothAdapter.getRemoteDevice(address)
         if (device == null) {
             callback?.onError("Device not found: $address")
             return

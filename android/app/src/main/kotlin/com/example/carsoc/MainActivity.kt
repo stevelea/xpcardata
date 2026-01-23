@@ -23,7 +23,7 @@ class MainActivity : FlutterActivity() {
     private val BM300_CHANNEL = "com.example.carsoc/bm300"
     private lateinit var bluetoothHelper: BluetoothHelper
     private lateinit var locationHelper: LocationHelper
-    private lateinit var bm300Helper: BM300BleHelper
+    private var bm300Helper: BM300BleHelper? = null
     private var shouldMinimiseOnStart = false
     private var stayInBackground = false
     private var wasInBackground = false
@@ -41,8 +41,14 @@ class MainActivity : FlutterActivity() {
         bluetoothHelper = BluetoothHelper(applicationContext, this)
         // Initialize LocationHelper
         locationHelper = LocationHelper(applicationContext)
-        // Initialize BM300 BLE Helper
-        bm300Helper = BM300BleHelper(applicationContext)
+        // Initialize BM300 BLE Helper (with error handling for devices without BLE)
+        try {
+            bm300Helper = BM300BleHelper(applicationContext)
+            android.util.Log.d("MainActivity", "BM300BleHelper initialized")
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Failed to initialize BM300BleHelper: ${e.message}")
+            bm300Helper = null
+        }
 
         // Check if app was launched with start_minimised flag from BootReceiver
         shouldMinimiseOnStart = intent?.getBooleanExtra("start_minimised", false) ?: false
@@ -419,8 +425,8 @@ class MainActivity : FlutterActivity() {
         // Set up BM300 Pro battery monitor method channel
         val bm300Channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BM300_CHANNEL)
 
-        // Set up BM300 callback to send data to Flutter
-        bm300Helper.setCallback(object : BM300BleHelper.BM300Callback {
+        // Set up BM300 callback to send data to Flutter (only if helper is available)
+        bm300Helper?.setCallback(object : BM300BleHelper.BM300Callback {
             override fun onDeviceFound(name: String, address: String) {
                 runOnUiThread {
                     bm300Channel.invokeMethod("onDeviceFound", mapOf(
@@ -460,20 +466,35 @@ class MainActivity : FlutterActivity() {
         })
 
         bm300Channel.setMethodCallHandler { call, result ->
+            val helper = bm300Helper
+            if (helper == null) {
+                // BM300 helper not available - return safe defaults
+                when (call.method) {
+                    "hasPermissions" -> result.success(false)
+                    "isBluetoothEnabled" -> result.success(false)
+                    "isConnected" -> result.success(false)
+                    "startScan", "stopScan", "connect", "disconnect" -> {
+                        result.error("NOT_AVAILABLE", "BM300 BLE not available on this device", null)
+                    }
+                    else -> result.notImplemented()
+                }
+                return@setMethodCallHandler
+            }
+
             when (call.method) {
                 "hasPermissions" -> {
-                    result.success(bm300Helper.hasPermissions())
+                    result.success(helper.hasPermissions())
                 }
                 "isBluetoothEnabled" -> {
-                    result.success(bm300Helper.isBluetoothEnabled())
+                    result.success(helper.isBluetoothEnabled())
                 }
                 "isConnected" -> {
-                    result.success(bm300Helper.isConnected())
+                    result.success(helper.isConnected())
                 }
                 "startScan" -> {
                     try {
                         val timeout = (call.argument<Number>("timeout")?.toLong()) ?: 10000L
-                        bm300Helper.startScan(timeout)
+                        helper.startScan(timeout)
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("SCAN_FAILED", e.message, null)
@@ -481,7 +502,7 @@ class MainActivity : FlutterActivity() {
                 }
                 "stopScan" -> {
                     try {
-                        bm300Helper.stopScan()
+                        helper.stopScan()
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("STOP_FAILED", e.message, null)
@@ -491,7 +512,7 @@ class MainActivity : FlutterActivity() {
                     try {
                         val address = call.argument<String>("address")
                         if (address != null) {
-                            bm300Helper.connect(address)
+                            helper.connect(address)
                             result.success(true)
                         } else {
                             result.error("INVALID_ARGUMENT", "Address is required", null)
@@ -502,7 +523,7 @@ class MainActivity : FlutterActivity() {
                 }
                 "disconnect" -> {
                     try {
-                        bm300Helper.disconnect()
+                        helper.disconnect()
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("DISCONNECT_FAILED", e.message, null)
