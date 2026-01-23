@@ -7,10 +7,14 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import java.util.UUID
@@ -87,7 +91,12 @@ class BM300BleHelper(private val context: Context) {
     private var callback: BM300Callback? = null
     private var isConnected = false
     private var isScanning = false
+    private var isClassicScanning = false
     private val handler = Handler(Looper.getMainLooper())
+
+    // Handler thread for BLE operations (more reliable on some devices)
+    private val bleHandlerThread = HandlerThread("BM300BleScanner").apply { start() }
+    private val bleHandler = Handler(bleHandlerThread.looper)
 
     // Periodic command timer
     private var commandTimer: Runnable? = null
@@ -131,8 +140,11 @@ class BM300BleHelper(private val context: Context) {
                locationManager?.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER) == true
     }
 
+    // Classic Bluetooth discovery receiver (fallback for devices where BLE scan doesn't work)
+    private var classicDiscoveryReceiver: BroadcastReceiver? = null
+
     /**
-     * Scan for BM300 Pro devices
+     * Scan for BM300 Pro devices using both BLE and classic Bluetooth discovery
      */
     @Throws(SecurityException::class)
     fun startScan(timeoutMs: Long = 10000) {
@@ -144,8 +156,7 @@ class BM300BleHelper(private val context: Context) {
         // Check if location is enabled - required for BLE scanning on Android
         if (!isLocationEnabled()) {
             android.util.Log.w(TAG, "Location services are DISABLED - BLE scanning may not work!")
-            callback?.onError("Location services must be enabled for BLE scanning")
-            // Continue anyway - some devices work without it
+            // Continue anyway - classic discovery might still work
         }
 
         if (bluetoothManager == null) {
@@ -158,74 +169,32 @@ class BM300BleHelper(private val context: Context) {
             return
         }
 
-        val scanner: BluetoothLeScanner? = bluetoothAdapter.bluetoothLeScanner
-        if (scanner == null) {
-            callback?.onError("BLE scanner not available")
-            return
-        }
-
-        if (isScanning) {
+        if (isScanning || isClassicScanning) {
             android.util.Log.d(TAG, "Already scanning")
             return
         }
 
-        // Stop any previously active scan first (Android only allows one scan at a time)
-        try {
-            activeScanCallback?.let { oldCallback ->
-                activeScanner?.stopScan(oldCallback)
-                android.util.Log.d(TAG, "Stopped previous scan before starting new one")
-            }
-        } catch (e: Exception) {
-            android.util.Log.w(TAG, "Error stopping previous scan: ${e.message}")
-        }
-
-        android.util.Log.d(TAG, "Starting BLE scan for BM300 devices (service UUID: $SERVICE_UUID)")
+        android.util.Log.d(TAG, "Starting scan for BM300 devices...")
         android.util.Log.d(TAG, "BLE adapter: ${bluetoothAdapter?.name}, state: ${bluetoothAdapter?.state}")
-        android.util.Log.d(TAG, "Scanner object: $scanner")
         android.util.Log.d(TAG, "Context type: ${context.javaClass.simpleName}")
-        isScanning = true
-        seenDevices.clear()  // Clear previously seen devices
-        reportedBM300Devices.clear()  // Clear previously reported BM300 devices
-        scanDeviceCount = 0  // Reset device counter
 
-        // Use LOW_LATENCY mode - most aggressive scanning, finds devices fastest
-        // Also set MATCH_MODE_AGGRESSIVE and CALLBACK_TYPE_ALL_MATCHES for maximum device discovery
-        val scanSettings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
-            .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
-            .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
-            .setReportDelay(0) // Immediate callbacks
-            .build()
+        seenDevices.clear()
+        reportedBM300Devices.clear()
+        scanDeviceCount = 0
 
-        android.util.Log.d(TAG, "Calling scanner.startScan() with LOW_LATENCY mode, AGGRESSIVE match, null filters...")
-        try {
-            // Store references for cleanup
-            activeScanner = scanner
-            activeScanCallback = scanCallback
+        // Start classic Bluetooth discovery FIRST (works on more devices including AI boxes)
+        startClassicDiscovery()
 
-            // Use null for filters - most compatible option
-            scanner.startScan(null, scanSettings, scanCallback)
-            android.util.Log.d(TAG, "scanner.startScan() completed successfully")
+        // Also try BLE scanning
+        startBleScan()
 
-            // Check Bluetooth adapter scanning state
-            android.util.Log.d(TAG, "Adapter state after startScan: enabled=${bluetoothAdapter?.isEnabled}, discovering=${bluetoothAdapter?.isDiscovering}")
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "scanner.startScan() FAILED: ${e.message}")
-            callback?.onError("BLE scan start failed: ${e.message}")
-            isScanning = false
-            activeScanner = null
-            activeScanCallback = null
-            return
-        }
-
-        // Log progress every 3 seconds (more frequent for debugging)
+        // Log progress every 3 seconds
         val progressRunnable = object : Runnable {
             var count = 0
             override fun run() {
-                if (isScanning) {
+                if (isScanning || isClassicScanning) {
                     count++
-                    android.util.Log.d(TAG, "Scan progress (${count * 3}s): ${seenDevices.size} unique devices, $scanDeviceCount callbacks received")
+                    android.util.Log.d(TAG, "Scan progress (${count * 3}s): ${seenDevices.size} unique devices, $scanDeviceCount BLE callbacks, classic=${isClassicScanning}")
                     if (count < (timeoutMs / 3000).toInt()) {
                         handler.postDelayed(this, 3000)
                     }
@@ -234,31 +203,194 @@ class BM300BleHelper(private val context: Context) {
         }
         handler.postDelayed(progressRunnable, 3000)
 
-        // Stop scan after timeout
+        // Stop all scans after timeout
         handler.postDelayed({
             stopScan()
         }, timeoutMs)
     }
 
+    /**
+     * Start classic Bluetooth discovery (fallback for AI boxes and devices where BLE doesn't work)
+     */
     @Throws(SecurityException::class)
-    fun stopScan() {
-        if (!isScanning) return
+    private fun startClassicDiscovery() {
+        android.util.Log.d(TAG, "Starting classic Bluetooth discovery...")
+
+        // Register receiver for discovered devices
+        classicDiscoveryReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                when (intent.action) {
+                    BluetoothDevice.ACTION_FOUND -> {
+                        val device: BluetoothDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                        }
+                        val rssi = intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, Short.MIN_VALUE).toInt()
+
+                        device?.let {
+                            try {
+                                val deviceName = it.name
+                                val deviceAddress = it.address
+
+                                // Log all discovered devices
+                                val isNewDevice = !seenDevices.contains(deviceAddress)
+                                if (isNewDevice) {
+                                    seenDevices.add(deviceAddress)
+                                    android.util.Log.d(TAG, "Classic #${seenDevices.size}: name='$deviceName' addr=$deviceAddress rssi=$rssi")
+                                }
+
+                                // Check if this looks like a BM300 device
+                                val isBM300 = when {
+                                    deviceName == null -> false
+                                    deviceName == DEVICE_NAME -> true
+                                    deviceName.matches(Regex("^[0-9A-Fa-f]{12}$")) -> true
+                                    deviceName.startsWith("BM") -> true
+                                    deviceName.contains("BM300", ignoreCase = true) -> true
+                                    deviceName.contains("BM6", ignoreCase = true) -> true
+                                    deviceName.contains("Ancel", ignoreCase = true) -> true
+                                    else -> false
+                                }
+
+                                if (isBM300 && !reportedBM300Devices.contains(deviceAddress)) {
+                                    reportedBM300Devices.add(deviceAddress)
+                                    val displayName = deviceName ?: "BM300"
+                                    android.util.Log.d(TAG, "*** CLASSIC MATCH! BM300 device: $displayName ($deviceAddress) rssi=$rssi ***")
+                                    callback?.onDeviceFound(displayName, deviceAddress)
+                                }
+                            } catch (e: SecurityException) {
+                                android.util.Log.e(TAG, "Security exception in classic discovery: ${e.message}")
+                            }
+                        }
+                    }
+                    BluetoothAdapter.ACTION_DISCOVERY_STARTED -> {
+                        android.util.Log.d(TAG, "Classic discovery started")
+                        isClassicScanning = true
+                    }
+                    BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
+                        android.util.Log.d(TAG, "Classic discovery finished")
+                        isClassicScanning = false
+                    }
+                }
+            }
+        }
+
+        // Register receiver
+        val filter = IntentFilter().apply {
+            addAction(BluetoothDevice.ACTION_FOUND)
+            addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED)
+            addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(classicDiscoveryReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            context.registerReceiver(classicDiscoveryReceiver, filter)
+        }
+
+        // Start discovery
+        try {
+            // Cancel any ongoing discovery first
+            if (bluetoothAdapter?.isDiscovering == true) {
+                bluetoothAdapter.cancelDiscovery()
+            }
+            val started = bluetoothAdapter?.startDiscovery() ?: false
+            android.util.Log.d(TAG, "Classic discovery startDiscovery() returned: $started")
+            isClassicScanning = started
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Failed to start classic discovery: ${e.message}")
+        }
+    }
+
+    /**
+     * Start BLE scanning
+     */
+    @Throws(SecurityException::class)
+    private fun startBleScan() {
+        val scanner: BluetoothLeScanner? = bluetoothAdapter?.bluetoothLeScanner
+        if (scanner == null) {
+            android.util.Log.w(TAG, "BLE scanner not available, using classic discovery only")
+            return
+        }
+
+        // Stop any previously active scan first
+        try {
+            activeScanCallback?.let { oldCallback ->
+                activeScanner?.stopScan(oldCallback)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Error stopping previous BLE scan: ${e.message}")
+        }
+
+        android.util.Log.d(TAG, "Starting BLE scan...")
+
+        // Use LOW_LATENCY mode for fastest device discovery
+        val scanSettings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+            .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
+            .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
+            .setReportDelay(0)
+            .build()
 
         try {
-            // Use the stored scanner and callback references
-            activeScanCallback?.let { cb ->
-                activeScanner?.stopScan(cb)
-            }
-            isScanning = false
-            val devicesFound = seenDevices.size
-            val totalCalls = scanDeviceCount
-            android.util.Log.d(TAG, "Scan stopped - saw $devicesFound unique devices, $totalCalls total callbacks, ${reportedBM300Devices.size} BM300 matches")
-            callback?.onScanStopped(devicesFound, totalCalls)
+            activeScanner = scanner
+            activeScanCallback = scanCallback
+            scanner.startScan(null, scanSettings, scanCallback)
+            isScanning = true
+            android.util.Log.d(TAG, "BLE scan started successfully")
         } catch (e: Exception) {
-            android.util.Log.e(TAG, "Error stopping scan: ${e.message}")
-        } finally {
+            android.util.Log.e(TAG, "BLE scan failed: ${e.message}")
+            isScanning = false
             activeScanner = null
             activeScanCallback = null
+        }
+    }
+
+    @Throws(SecurityException::class)
+    fun stopScan() {
+        val wasScanning = isScanning || isClassicScanning
+
+        // Stop BLE scan
+        if (isScanning) {
+            try {
+                activeScanCallback?.let { cb ->
+                    activeScanner?.stopScan(cb)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Error stopping BLE scan: ${e.message}")
+            }
+            isScanning = false
+            activeScanner = null
+            activeScanCallback = null
+        }
+
+        // Stop classic discovery
+        if (isClassicScanning) {
+            try {
+                bluetoothAdapter?.cancelDiscovery()
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Error stopping classic discovery: ${e.message}")
+            }
+            isClassicScanning = false
+        }
+
+        // Unregister receiver
+        classicDiscoveryReceiver?.let {
+            try {
+                context.unregisterReceiver(it)
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "Error unregistering receiver: ${e.message}")
+            }
+            classicDiscoveryReceiver = null
+        }
+
+        if (wasScanning) {
+            val devicesFound = seenDevices.size
+            val totalCalls = scanDeviceCount
+            android.util.Log.d(TAG, "All scans stopped - saw $devicesFound unique devices, $totalCalls BLE callbacks, ${reportedBM300Devices.size} BM300 matches")
+            callback?.onScanStopped(devicesFound, totalCalls)
         }
     }
 
@@ -580,5 +712,11 @@ class BM300BleHelper(private val context: Context) {
     fun dispose() {
         stopScan()
         disconnect()
+        // Clean up handler thread
+        try {
+            bleHandlerThread.quitSafely()
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Error stopping handler thread: ${e.message}")
+        }
     }
 }
