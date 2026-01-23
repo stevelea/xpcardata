@@ -198,6 +198,41 @@ class _DataSettingsScreenState extends ConsumerState<DataSettingsScreen> {
     }
   }
 
+  Future<void> _shareBackup() async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
+    setState(() => _backupInProgress = true);
+
+    try {
+      final success = await BackupService.instance.shareBackup();
+
+      if (mounted) {
+        setState(() => _backupInProgress = false);
+
+        if (success) {
+          scaffoldMessenger.showSnackBar(
+            const SnackBar(
+              content: Text('Backup shared successfully!'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+        // Don't show error for dismissed shares - user just cancelled
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _backupInProgress = false);
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text('Share error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _restoreBackup() async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
@@ -361,32 +396,40 @@ class _DataSettingsScreenState extends ConsumerState<DataSettingsScreen> {
                       ),
                     ),
                   const Divider(),
-                  // Export options
+                  // Export options - Share button (primary)
+                  ElevatedButton.icon(
+                    onPressed: _backupInProgress ? null : _shareBackup,
+                    icon: _backupInProgress
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.share),
+                    label: Text(_backupInProgress ? 'Preparing...' : 'Share Backup'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size(double.infinity, 44),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Secondary export options
                   Row(
                     children: [
                       Expanded(
-                        child: ElevatedButton.icon(
+                        child: OutlinedButton.icon(
                           onPressed: _backupInProgress ? null : _saveBackupToDownloads,
-                          icon: _backupInProgress
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.download),
-                          label: Text(_backupInProgress ? 'Saving...' : 'Save to Downloads'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue,
-                            foregroundColor: Colors.white,
-                          ),
+                          icon: const Icon(Icons.download, size: 18),
+                          label: const Text('Downloads'),
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: _backupInProgress ? null : _copyBackupToClipboard,
-                          icon: const Icon(Icons.copy),
-                          label: const Text('Copy to Clipboard'),
+                          icon: const Icon(Icons.copy, size: 18),
+                          label: const Text('Clipboard'),
                         ),
                       ),
                     ],
@@ -403,6 +446,9 @@ class _DataSettingsScreenState extends ConsumerState<DataSettingsScreen> {
                           )
                         : const Icon(Icons.file_open),
                     label: Text(_restoreInProgress ? 'Importing...' : 'Import from File'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 44),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Text(

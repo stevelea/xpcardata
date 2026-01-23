@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../models/charging_session.dart';
 import 'github_update_service.dart' show appVersion;
 import 'hive_storage_service.dart';
@@ -191,6 +192,68 @@ class BackupService {
     } catch (e) {
       _error = 'Copy failed: $e';
       debugPrint('[Backup] Clipboard error: $e');
+      return false;
+    }
+  }
+
+  /// Share backup via Android share sheet (Google Drive, Email, etc.)
+  Future<bool> shareBackup() async {
+    _error = null;
+    try {
+      debugPrint('[Backup] Creating backup for sharing...');
+
+      final settings = await _collectSettings();
+      final sessions = await _collectChargingSessions();
+
+      final backup = {
+        'version': _backupVersion,
+        'created_at': DateTime.now().toIso8601String(),
+        'app_version': appVersion,
+        'settings': settings,
+        'charging_sessions': sessions,
+      };
+
+      final jsonString = const JsonEncoder.withIndent('  ').convert(backup);
+
+      // Create a temp file for sharing
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final fileName = 'xpcardata_backup_$timestamp.json';
+      String filePath;
+
+      try {
+        final directory = await getApplicationCacheDirectory();
+        filePath = '${directory.path}/$fileName';
+      } catch (e) {
+        filePath = '/data/data/com.example.carsoc/cache/$fileName';
+      }
+
+      final file = File(filePath);
+      await file.writeAsString(jsonString);
+
+      // Share the file using share_plus
+      final result = await Share.shareXFiles(
+        [XFile(filePath, mimeType: 'application/json')],
+        subject: 'XPCarData Backup',
+        text: 'XPCarData settings and charging history backup',
+      );
+
+      if (result.status == ShareResultStatus.success ||
+          result.status == ShareResultStatus.dismissed) {
+        _lastBackupTime = DateTime.now();
+        await _saveLastBackupTime();
+
+        debugPrint('[Backup] Shared successfully (${jsonString.length} bytes)');
+        debugPrint('[Backup] Settings count: ${settings.length}');
+        debugPrint('[Backup] Sessions count: ${sessions.length}');
+
+        return true;
+      } else {
+        _error = 'Share was cancelled';
+        return false;
+      }
+    } catch (e) {
+      _error = 'Share failed: $e';
+      debugPrint('[Backup] Share error: $e');
       return false;
     }
   }
