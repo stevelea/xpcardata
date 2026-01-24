@@ -8,6 +8,7 @@ import '../../services/obd_proxy_service.dart';
 import '../../services/obd_service.dart';
 import '../../services/hive_storage_service.dart';
 import '../../services/bm300_battery_service.dart';
+import '../../services/connectivity_watchdog_service.dart';
 import '../obd_connection_screen.dart';
 import '../obd_pid_config_screen.dart';
 
@@ -35,6 +36,7 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
   // Tailscale
   bool _tailscaleInstalled = false;
   bool _tailscaleAutoConnect = false;
+  bool _tailscaleAutoReconnect = false; // Watchdog: periodically check and reconnect
 
   // OBD WiFi Proxy
   bool _proxyEnabled = false;
@@ -221,6 +223,7 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
         _haDiscoveryEnabled = prefs.getBool('ha_discovery_enabled') ?? false;
         _mqttReconnectIntervalSeconds = prefs.getInt('mqtt_reconnect_interval') ?? 0;
         _tailscaleAutoConnect = prefs.getBool('tailscale_auto_connect') ?? false;
+        _tailscaleAutoReconnect = prefs.getBool('tailscale_auto_reconnect') ?? false;
       });
       debugPrint('[Connections] Loaded settings from SharedPreferences');
     } catch (e) {
@@ -238,6 +241,7 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
           _haDiscoveryEnabled = hive.getSetting<bool>('ha_discovery_enabled') ?? false;
           _mqttReconnectIntervalSeconds = hive.getSetting<int>('mqtt_reconnect_interval') ?? 0;
           _tailscaleAutoConnect = hive.getSetting<bool>('tailscale_auto_connect') ?? false;
+          _tailscaleAutoReconnect = hive.getSetting<bool>('tailscale_auto_reconnect') ?? false;
         });
         debugPrint('[Connections] Loaded settings from Hive');
       }
@@ -584,6 +588,22 @@ class _ConnectionsSettingsScreenState extends ConsumerState<ConnectionsSettingsS
                       onChanged: (value) {
                         setState(() => _tailscaleAutoConnect = value);
                         _autoSaveBool('tailscale_auto_connect', value);
+                      },
+                    ),
+                    SwitchListTile(
+                      title: const Text('Auto-Reconnect'),
+                      subtitle: const Text('Periodically check and reconnect if VPN drops (every 60s)'),
+                      value: _tailscaleAutoReconnect,
+                      onChanged: (value) {
+                        setState(() => _tailscaleAutoReconnect = value);
+                        _autoSaveBool('tailscale_auto_reconnect', value);
+                        // Update watchdog service
+                        ConnectivityWatchdogService.instance.updateSettings(
+                          tailscaleAutoReconnect: value,
+                        );
+                        if (value && !ConnectivityWatchdogService.instance.isRunning) {
+                          ConnectivityWatchdogService.instance.start();
+                        }
                       },
                     ),
                     const SizedBox(height: 8),

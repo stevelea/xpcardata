@@ -20,6 +20,7 @@ import 'services/mock_data_service.dart';
 import 'services/healthcheck_service.dart';
 import 'services/keep_alive_service.dart';
 import 'services/bm300_battery_service.dart';
+import 'services/connectivity_watchdog_service.dart';
 import 'providers/vehicle_data_provider.dart';
 import 'providers/mqtt_provider.dart';
 import 'screens/home_screen.dart';
@@ -537,6 +538,14 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
           useTLS: useTLS,
         );
         print('MQTT auto-connected on startup (HA Discovery: $haDiscoveryEnabled)');
+
+        // Initialize connectivity watchdog with MQTT service reference
+        final watchdog = ConnectivityWatchdogService.instance;
+        watchdog.setMqttService(mqttService);
+        await watchdog.initialize();
+        watchdog.updateSettings(mqttEnabled: true);
+        watchdog.start();
+        print('Connectivity watchdog started');
       } catch (e) {
         print('MQTT auto-connect failed: $e');
       }
