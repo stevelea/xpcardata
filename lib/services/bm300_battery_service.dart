@@ -52,6 +52,9 @@ class BM300BatteryService {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
   ]);
 
+  // Staleness timeout - data older than this is considered stale
+  static const _stalenessTimeout = Duration(seconds: 30);
+
   // State
   bool _isEnabled = false;
   bool _isConnected = false;
@@ -59,6 +62,7 @@ class BM300BatteryService {
   String? _connectedDeviceAddress;
   String? _savedDeviceAddress;
   BM300BatteryData? _lastData;
+  Timer? _stalenessTimer;
 
   // BLE connection
   BluetoothDevice? _connectedDevice;
@@ -92,6 +96,26 @@ class BM300BatteryService {
   /// Stream of discovered devices during scan
   Stream<Map<String, String>> get deviceFoundStream =>
       _deviceFoundController.stream;
+
+  /// Reset staleness timer - called when fresh data is received
+  void _resetStalenessTimer() {
+    _stalenessTimer?.cancel();
+    _stalenessTimer = Timer(_stalenessTimeout, () {
+      _logger.log('[BM300] Data stale - no updates for ${_stalenessTimeout.inSeconds}s');
+      _lastData = null;
+      _dataController.add(BM300BatteryData(
+        voltage: 0,
+        soc: 0,
+        temperature: 0,
+      )); // Emit empty data to trigger UI update
+    });
+  }
+
+  /// Cancel staleness timer
+  void _cancelStalenessTimer() {
+    _stalenessTimer?.cancel();
+    _stalenessTimer = null;
+  }
 
   /// Initialize the service
   Future<void> initialize() async {
@@ -184,6 +208,7 @@ class BM300BatteryService {
 
           _lastData = batteryData;
           _dataController.add(batteryData);
+          _resetStalenessTimer();
           _logger.log('[BM300] Native data: $batteryData');
         }
         break;
@@ -696,6 +721,7 @@ class BM300BatteryService {
 
         _lastData = batteryData;
         _dataController.add(batteryData);
+        _resetStalenessTimer();
         _logger.log('[BM300] Data: $batteryData');
       }
     } catch (e) {
@@ -760,6 +786,7 @@ class BM300BatteryService {
     try {
       _commandTimer?.cancel();
       _commandTimer = null;
+      _cancelStalenessTimer();
       _notifySubscription?.cancel();
       _notifySubscription = null;
       _connectionSubscription?.cancel();
@@ -783,6 +810,7 @@ class BM300BatteryService {
 
       _isConnected = false;
       _connectedDeviceAddress = null;
+      _lastData = null;
       _connectionController.add(false);
       _logger.log('[BM300] Disconnected');
     } catch (e) {

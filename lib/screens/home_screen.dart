@@ -643,9 +643,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
 
     // 12V auxiliary battery voltage - prefer BM300 Pro if connected, fallback to OBD AUX_V
     final obdAuxVoltage = data.additionalProperties?['AUX_V'] as double?;
-    final bm300Voltage = _bm300Data?.voltage;
-    final bm300Soc = _bm300Data?.soc;
-    final bm300Temp = _bm300Data?.temperature;
+    // BM300 data is null if not connected, or voltage=0 if stale (no updates for 30s)
+    final bm300Voltage = (_bm300Data?.voltage ?? 0) > 0 ? _bm300Data?.voltage : null;
+    final bm300Soc = bm300Voltage != null ? _bm300Data?.soc : null;
+    final bm300Temp = bm300Voltage != null ? _bm300Data?.temperature : null;
 
     // Use BM300 voltage if available, otherwise OBD AUX_V
     final auxVoltage = bm300Voltage ?? obdAuxVoltage;
