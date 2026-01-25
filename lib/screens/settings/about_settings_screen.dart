@@ -6,6 +6,7 @@ import '../../services/mock_data_service.dart';
 import '../../services/github_update_service.dart' show appVersion;
 import '../../build_info.dart';
 import '../debug_log_screen.dart';
+import '../manual_screen.dart';
 
 /// About settings sub-screen
 /// Includes: About, Debug
@@ -102,6 +103,21 @@ class _AboutSettingsScreenState extends ConsumerState<AboutSettingsScreen> {
                       'OpenChargeMap Location Lookup\n'
                       'Fleet Analytics • Home Assistant',
                     ),
+                  ),
+                  const Divider(),
+                  ListTile(
+                    leading: const Icon(Icons.menu_book),
+                    title: const Text('User Manual'),
+                    subtitle: const Text('Installation, setup & features guide'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ManualScreen(),
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),
