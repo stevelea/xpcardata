@@ -41,7 +41,33 @@ void main() async {
 
     // Catch async errors not caught by Flutter framework
     PlatformDispatcher.instance.onError = (error, stack) {
-      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      // Check if this is a recoverable error
+      final errorStr = error.toString();
+
+      // Network/socket errors - recoverable via reconnection
+      final isNetworkError = errorStr.contains('SocketException') ||
+          errorStr.contains('Connection refused') ||
+          errorStr.contains('Connection reset') ||
+          errorStr.contains('connection abort') ||
+          errorStr.contains('Broken pipe') ||
+          errorStr.contains('Network is unreachable');
+
+      // Plugin errors on AI box - expected when native impl unavailable
+      final isPluginError = errorStr.contains('MissingPluginException') ||
+          errorStr.contains('No implementation found');
+
+      final isRecoverable = isNetworkError || isPluginError;
+
+      // Record as non-fatal for recoverable errors
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: !isRecoverable);
+
+      // Log the error type
+      String errorType = 'Fatal';
+      if (isNetworkError) errorType = 'Network';
+      if (isPluginError) errorType = 'Plugin';
+      DebugLogger.instance.log('[CRASH] $errorType error: $errorStr');
+
+      // Return true to indicate we handled it (prevents app crash for non-fatal)
       return true;
     };
 
