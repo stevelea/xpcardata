@@ -146,63 +146,103 @@ class BackgroundServiceManager {
 
   /// Update notification content
   void updateNotification(String title, String content) {
-    final service = FlutterBackgroundService();
-    service.invoke('updateNotification', {
-      'title': title,
-      'content': content,
-    });
+    if (_initializationFailed) {
+      return; // Service not available
+    }
+
+    try {
+      final service = FlutterBackgroundService();
+      service.invoke('updateNotification', {
+        'title': title,
+        'content': content,
+      });
+    } catch (e) {
+      _logger.log('[BackgroundService] updateNotification failed: $e');
+    }
   }
 }
 
 /// Background service entry point - runs in isolate
 @pragma('vm:entry-point')
 Future<void> onStart(ServiceInstance service) async {
-  DartPluginRegistrant.ensureInitialized();
+  // Run in error zone to catch all errors in the isolate
+  runZonedGuarded(() async {
+    DartPluginRegistrant.ensureInitialized();
 
-  final logger = DebugLogger.instance;
-  logger.log('[BackgroundService] Service started in isolate');
+    final logger = DebugLogger.instance;
+    logger.log('[BackgroundService] Service started in isolate');
 
-  // Handle stop command
-  service.on('stop').listen((event) {
-    service.stopSelf();
-    logger.log('[BackgroundService] Service stopped by command');
-  });
-
-  // Handle notification update
-  service.on('updateNotification').listen((event) {
-    if (service is AndroidServiceInstance) {
-      final title = event?['title'] ?? 'XPCarData';
-      final content = event?['content'] ?? 'Collecting vehicle data...';
-      service.setForegroundNotificationInfo(
-        title: title,
-        content: content,
-      );
+    // Handle stop command - wrap in try-catch for AI box compatibility
+    try {
+      service.on('stop').listen((event) {
+        try {
+          service.stopSelf();
+          logger.log('[BackgroundService] Service stopped by command');
+        } catch (e) {
+          logger.log('[BackgroundService] stopSelf error: $e');
+        }
+      });
+    } catch (e) {
+      logger.log('[BackgroundService] Failed to register stop listener: $e');
     }
-  });
 
-  // Set as foreground service on Android
-  if (service is AndroidServiceInstance) {
-    service.setAsForegroundService();
-  }
+    // Handle notification update - wrap in try-catch for AI box compatibility
+    try {
+      service.on('updateNotification').listen((event) {
+        try {
+          if (service is AndroidServiceInstance) {
+            final title = event?['title'] ?? 'XPCarData';
+            final content = event?['content'] ?? 'Collecting vehicle data...';
+            service.setForegroundNotificationInfo(
+              title: title,
+              content: content,
+            );
+          }
+        } catch (e) {
+          logger.log('[BackgroundService] setForegroundNotificationInfo error: $e');
+        }
+      });
+    } catch (e) {
+      logger.log('[BackgroundService] Failed to register notification listener: $e');
+    }
 
-  // Main background loop
-  Timer.periodic(const Duration(seconds: 30), (timer) async {
-    if (service is AndroidServiceInstance) {
-      if (await service.isForegroundService()) {
-        // Update notification with current time to show service is active
-        final now = DateTime.now();
-        final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-        service.setForegroundNotificationInfo(
-          title: 'XPCarData',
-          content: 'Last update: $timeStr',
-        );
+    // Set as foreground service on Android - wrap in try-catch for AI box compatibility
+    try {
+      if (service is AndroidServiceInstance) {
+        service.setAsForegroundService();
       }
+    } catch (e) {
+      logger.log('[BackgroundService] Failed to set foreground service: $e');
     }
 
-    // Send data to UI if needed
-    service.invoke('update', {
-      'timestamp': DateTime.now().toIso8601String(),
+    // Main background loop - wrap all operations in try-catch
+    Timer.periodic(const Duration(seconds: 30), (timer) async {
+      try {
+        if (service is AndroidServiceInstance) {
+          if (await service.isForegroundService()) {
+            // Update notification with current time to show service is active
+            final now = DateTime.now();
+            final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+            service.setForegroundNotificationInfo(
+              title: 'XPCarData',
+              content: 'Last update: $timeStr',
+            );
+          }
+        }
+
+        // Send data to UI if needed
+        service.invoke('update', {
+          'timestamp': DateTime.now().toIso8601String(),
+        });
+      } catch (e) {
+        logger.log('[BackgroundService] Timer tick error: $e');
+      }
     });
+  }, (error, stackTrace) {
+    // Catch any unhandled errors in the isolate
+    final logger = DebugLogger.instance;
+    logger.log('[BackgroundService] Uncaught error in isolate: $error');
+    // Don't rethrow - let the service continue running
   });
 }
 
