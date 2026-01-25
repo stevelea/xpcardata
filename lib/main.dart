@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'services/database_service.dart';
@@ -33,10 +35,21 @@ void main() async {
   try {
     final firebaseApp = await Firebase.initializeApp();
     print('Firebase initialized: ${firebaseApp.name}, project: ${firebaseApp.options.projectId}');
+
+    // Initialize Crashlytics for crash reporting
+    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+
+    // Catch async errors not caught by Flutter framework
+    PlatformDispatcher.instance.onError = (error, stack) {
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      return true;
+    };
+
+    print('Firebase Crashlytics initialized');
   } catch (e, stackTrace) {
     print('Firebase initialization failed: $e');
     print('Stack trace: $stackTrace');
-    print('App will continue without fleet analytics');
+    print('App will continue without fleet analytics and crash reporting');
   }
 
   // Initialize debug logger settings
@@ -58,6 +71,21 @@ void main() async {
   try {
     final hiveInitialized = await HiveStorageService.instance.initialize();
     print('Hive storage initialized: $hiveInitialized');
+
+    // Set Crashlytics user context for better crash debugging
+    if (hiveInitialized) {
+      try {
+        final hive = HiveStorageService.instance;
+        final vehicleId = hive.getSetting<String>('mqtt_vehicle_id');
+        if (vehicleId != null && vehicleId.isNotEmpty) {
+          FirebaseCrashlytics.instance.setUserIdentifier(vehicleId);
+        }
+        FirebaseCrashlytics.instance.setCustomKey('vehicle_model',
+            hive.getSetting<String>('vehicle_model') ?? 'unknown');
+      } catch (_) {
+        // Crashlytics may not be initialized
+      }
+    }
   } catch (e) {
     print('Hive initialization failed: $e');
     print('App will continue without Hive persistence');
