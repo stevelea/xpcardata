@@ -160,6 +160,57 @@ class BackgroundServiceManager {
       _logger.log('[BackgroundService] updateNotification failed: $e');
     }
   }
+
+  /// Update notification with connection status
+  /// Shows OBD and MQTT status in the notification bar
+  void updateStatusNotification({
+    required bool obdConnected,
+    required bool mqttConnected,
+    double? soc,
+    double? power,
+    bool? isCharging,
+  }) {
+    if (_initializationFailed) {
+      return;
+    }
+
+    try {
+      // Build title with connection indicators
+      String title = 'XPCarData';
+      if (obdConnected || mqttConnected) {
+        final connected = <String>[];
+        if (obdConnected) connected.add('OBD');
+        if (mqttConnected) connected.add('MQTT');
+        title = 'XPCarData [${connected.join(' | ')}]';
+      }
+
+      // Build content with vehicle data
+      String content;
+      if (soc != null) {
+        final socStr = soc.toStringAsFixed(0);
+        if (isCharging == true && power != null) {
+          final powerStr = power.abs().toStringAsFixed(1);
+          content = 'SOC: $socStr% | Charging: ${powerStr}kW';
+        } else if (power != null && power.abs() > 0.5) {
+          final powerStr = power.toStringAsFixed(1);
+          content = 'SOC: $socStr% | Power: ${powerStr}kW';
+        } else {
+          content = 'SOC: $socStr%';
+        }
+      } else {
+        // No data yet
+        if (!obdConnected && !mqttConnected) {
+          content = 'Not connected';
+        } else {
+          content = 'Waiting for data...';
+        }
+      }
+
+      updateNotification(title, content);
+    } catch (e) {
+      _logger.log('[BackgroundService] updateStatusNotification failed: $e');
+    }
+  }
 }
 
 /// Background service entry point - runs in isolate

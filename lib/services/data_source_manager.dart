@@ -18,6 +18,7 @@ import 'mock_data_service.dart';
 import 'debug_logger.dart';
 import 'hive_storage_service.dart';
 import 'keep_alive_service.dart';
+import 'background_service.dart';
 
 /// Data source types available
 enum DataSource {
@@ -259,6 +260,7 @@ class DataSourceManager {
     _publishToFleetAnalytics(enrichedData);
     _sendToAndroidAuto(enrichedData);
     _processChargingData(enrichedData);
+    _updateStatusBarNotification(enrichedData);
     // Pulse keep-alive to prove app is active
     KeepAliveService.instance.pulse();
   }
@@ -422,6 +424,7 @@ class DataSourceManager {
         _publishToFleetAnalytics(enrichedData);
         _sendToAndroidAuto(enrichedData);
         _processChargingData(enrichedData);
+        _updateStatusBarNotification(enrichedData);
       },
       onError: (error) {
         // On error, try to fall back to another source
@@ -442,6 +445,7 @@ class DataSourceManager {
         _publishToFleetAnalytics(enrichedData);
         _sendToAndroidAuto(enrichedData);
         _processChargingData(enrichedData);
+        _updateStatusBarNotification(enrichedData);
         _checkAuxBatteryProtection(enrichedData);
         // Pulse keep-alive to prove app is active
         KeepAliveService.instance.pulse();
@@ -585,6 +589,26 @@ class DataSourceManager {
   /// Process vehicle data for charging session detection
   void _processChargingData(VehicleData data) {
     _chargingSessionService.processVehicleData(data);
+  }
+
+  /// Update status bar notification with current connection status and vehicle data
+  void _updateStatusBarNotification(VehicleData data) {
+    final obdConnected = _obdService.isConnected;
+    final mqttConnected = _mqttService?.isConnected ?? false;
+
+    // Determine if charging based on current
+    bool? isCharging;
+    if (data.batteryCurrent != null && data.speed != null && data.speed! < 1.0) {
+      isCharging = data.batteryCurrent! < -0.5;
+    }
+
+    BackgroundServiceManager.instance.updateStatusNotification(
+      obdConnected: obdConnected,
+      mqttConnected: mqttConnected,
+      soc: data.stateOfCharge,
+      power: data.power,
+      isCharging: isCharging,
+    );
   }
 
   /// Publish anonymous metrics to fleet analytics if enabled
