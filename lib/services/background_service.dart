@@ -18,6 +18,14 @@ class BackgroundServiceManager {
   static const String notificationChannelName = 'XPCarData Background Service';
   static const int notificationId = 888;
 
+  // Status notification (works without background service)
+  static const String statusChannelId = 'xpcardata_status';
+  static const String statusChannelName = 'XPCarData Status';
+  static const int statusNotificationId = 889;
+
+  FlutterLocalNotificationsPlugin? _notificationsPlugin;
+  bool _statusNotificationEnabled = false;
+
   /// Initialize the background service
   Future<void> initialize() async {
     try {
@@ -163,17 +171,14 @@ class BackgroundServiceManager {
 
   /// Update notification with connection status
   /// Shows OBD and MQTT status in the notification bar
-  void updateStatusNotification({
+  /// Works with or without the background service running
+  Future<void> updateStatusNotification({
     required bool obdConnected,
     required bool mqttConnected,
     double? soc,
     double? power,
     bool? isCharging,
-  }) {
-    if (_initializationFailed) {
-      return;
-    }
-
+  }) async {
     try {
       // Build title with connection indicators
       String title = 'XPCarData';
@@ -206,9 +211,87 @@ class BackgroundServiceManager {
         }
       }
 
-      updateNotification(title, content);
+      // Try background service notification first (if running)
+      if (!_initializationFailed) {
+        try {
+          final service = FlutterBackgroundService();
+          final isRunning = await service.isRunning();
+          if (isRunning) {
+            updateNotification(title, content);
+            return;
+          }
+        } catch (_) {
+          // Background service not available, fall through to direct notification
+        }
+      }
+
+      // Use direct notification if background service not running
+      await _showDirectNotification(title, content);
     } catch (e) {
       _logger.log('[BackgroundService] updateStatusNotification failed: $e');
+    }
+  }
+
+  /// Show a direct notification without background service
+  Future<void> _showDirectNotification(String title, String content) async {
+    try {
+      // Initialize plugin if needed
+      _notificationsPlugin ??= FlutterLocalNotificationsPlugin();
+
+      // Create status channel if it doesn't exist
+      const AndroidNotificationChannel channel = AndroidNotificationChannel(
+        statusChannelId,
+        statusChannelName,
+        description: 'Shows vehicle status when app is running',
+        importance: Importance.low,
+        showBadge: false,
+        enableVibration: false,
+        playSound: false,
+      );
+
+      await _notificationsPlugin!
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(channel);
+
+      // Show/update the notification
+      const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+        statusChannelId,
+        statusChannelName,
+        channelDescription: 'Shows vehicle status when app is running',
+        importance: Importance.low,
+        priority: Priority.low,
+        ongoing: true,
+        autoCancel: false,
+        showWhen: false,
+        silent: true,
+      );
+
+      const NotificationDetails notificationDetails = NotificationDetails(
+        android: androidDetails,
+      );
+
+      await _notificationsPlugin!.show(
+        statusNotificationId,
+        title,
+        content,
+        notificationDetails,
+      );
+
+      _statusNotificationEnabled = true;
+    } catch (e) {
+      _logger.log('[BackgroundService] Direct notification failed: $e');
+    }
+  }
+
+  /// Cancel the status notification
+  Future<void> cancelStatusNotification() async {
+    try {
+      _notificationsPlugin ??= FlutterLocalNotificationsPlugin();
+      await _notificationsPlugin!.cancel(statusNotificationId);
+      _statusNotificationEnabled = false;
+    } catch (e) {
+      _logger.log('[BackgroundService] Cancel notification failed: $e');
     }
   }
 }
