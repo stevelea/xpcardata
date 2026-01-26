@@ -140,6 +140,7 @@ class ConnectivityWatchdogService {
   /// Run a connectivity check
   Future<void> _runCheck() async {
     _lastCheck = DateTime.now();
+    _logger.log('[Watchdog] Running connectivity check...');
 
     try {
       // Check Tailscale (only on Android)
@@ -147,9 +148,11 @@ class ConnectivityWatchdogService {
         await _checkTailscale();
       }
 
-      // Check MQTT
-      if (_mqttEnabled && _mqttService != null) {
+      // Check MQTT - always check if we have a service reference
+      if (_mqttService != null) {
         await _checkMqtt();
+      } else {
+        _logger.log('[Watchdog] MQTT service not set');
       }
     } catch (e) {
       _logger.log('[Watchdog] Check error: $e');
@@ -185,15 +188,19 @@ class ConnectivityWatchdogService {
     if (_mqttService == null) return;
 
     try {
-      if (!_mqttService!.isConnected) {
-        _logger.log('[Watchdog] MQTT not connected, will trigger reconnect...');
+      final isConnected = _mqttService!.isConnected;
+      _logger.log('[Watchdog] MQTT check: connected=$isConnected');
+
+      if (!isConnected) {
+        _logger.log('[Watchdog] MQTT not connected, triggering reconnect...');
         _mqttReconnectAttempts++;
         _lastMqttReconnect = DateTime.now();
 
-        // The MQTT service has its own reconnection logic via periodic reconnect
-        // We just need to ensure it's enabled
+        // Directly trigger reconnection attempt
+        await _mqttService!.reconnect();
+
+        // Also ensure periodic reconnect is enabled as backup
         if (_mqttService!.periodicReconnectInterval == 0) {
-          // Enable periodic reconnect if not already enabled
           _mqttService!.periodicReconnectInterval = 30;
           _logger.log('[Watchdog] Enabled MQTT periodic reconnect (30s)');
         }

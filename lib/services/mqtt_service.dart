@@ -793,18 +793,27 @@ class MqttService {
 
   /// Try to reconnect if not connected (called by periodic timer)
   Future<void> _tryPeriodicReconnect() async {
-    if (isConnected || _isConnecting) {
-      return; // Already connected or connecting
+    await reconnect();
+  }
+
+  /// Public method to trigger reconnection (called by watchdog or externally)
+  Future<bool> reconnect() async {
+    if (isConnected) {
+      return true; // Already connected
+    }
+
+    if (_isConnecting) {
+      return false; // Already trying to connect
     }
 
     if (_broker == null || _port == null || _vehicleId == null) {
-      return; // No connection settings configured
+      return false; // No connection settings configured
     }
 
     // Reset reconnect attempts to allow a fresh try
     _reconnectAttempts = 0;
 
-    await connect(
+    return await connect(
       broker: _broker!,
       port: _port!,
       vehicleId: _vehicleId!,
