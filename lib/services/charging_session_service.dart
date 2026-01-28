@@ -68,6 +68,12 @@ class ChargingSessionService {
   int _nonChargingSampleCount = 0;
   static const int _requiredNonChargingSamples = 2; // 2 consecutive samples with no charging indicators
 
+  // Pending session start - waiting for valid SOC before creating session
+  bool _pendingSessionStart = false;
+  ChargingType? _pendingSessionType;
+  double? _pendingSessionPower;
+  DateTime? _pendingSessionStartTime;
+
   // Charging curve sample collection
   List<ChargingSample> _currentSessionSamples = [];
   DateTime? _lastCurveSampleTime;
@@ -453,6 +459,14 @@ class ChargingSessionService {
     if (!wasCharging && isNowCharging) {
       _startNewSession(data, detectedType, detectedPower);
     } else if (shouldStopCharging) {
+      // If we had a pending session that never got valid SOC, cancel it
+      if (_pendingSessionStart) {
+        _logger.log('[Charging] Cancelling pending session - charging stopped before valid SOC received');
+        _pendingSessionStart = false;
+        _pendingSessionType = null;
+        _pendingSessionPower = null;
+        _pendingSessionStartTime = null;
+      }
       _completeSession(data);
     } else if (_isCharging && _currentSession != null) {
       _updateActiveSession(data, detectedType, detectedPower);
@@ -460,6 +474,15 @@ class ChargingSessionService {
       // App started while already charging - create session retroactively
       _logger.log('[Charging] === RETROACTIVE START (app launched during charging) ===');
       _startNewSession(data, detectedType, detectedPower);
+    }
+
+    // Check if we have a pending session waiting for valid SOC
+    if (_pendingSessionStart && _isCharging && _currentSession == null && data.stateOfCharge != null) {
+      _logger.log('[Charging] === DEFERRED START (valid SOC now available: ${data.stateOfCharge!.toStringAsFixed(1)}%) ===');
+      // Use the original session type/power, but current data for SOC
+      final type = _pendingSessionType ?? detectedType;
+      final power = _pendingSessionPower ?? detectedPower;
+      _startNewSession(data, type, power);
     }
 
     // Update last cumulative charge and voltage
@@ -483,6 +506,25 @@ class ChargingSessionService {
 
   /// Start a new charging session
   void _startNewSession(VehicleData data, ChargingType type, double powerKw) {
+    // Check if we have valid SOC - if not, defer session start
+    if (data.stateOfCharge == null) {
+      _logger.log('[Charging] SOC is null - deferring session start until valid SOC available');
+      _pendingSessionStart = true;
+      _pendingSessionType = type;
+      _pendingSessionPower = powerKw;
+      _pendingSessionStartTime = data.timestamp;
+      // Start accumulating energy even while waiting for SOC
+      _accumulatedEnergyKwh = 0.0;
+      _lastPowerSampleTime = data.timestamp;
+      return;
+    }
+
+    // Clear any pending session state
+    _pendingSessionStart = false;
+    _pendingSessionType = null;
+    _pendingSessionPower = null;
+    _pendingSessionStartTime = null;
+
     final sessionId = 'charge_${DateTime.now().millisecondsSinceEpoch}';
     final startCumulative = _lastCumulativeCharge ?? data.cumulativeCharge ?? 0;
 
@@ -490,8 +532,8 @@ class ChargingSessionService {
     _accumulatedEnergyKwh = 0.0;
     _lastPowerSampleTime = data.timestamp;
 
-    // Initialize peak SOC tracking with start SOC
-    _peakSocDuringSession = data.stateOfCharge ?? 0;
+    // Initialize peak SOC tracking with start SOC (now guaranteed non-null)
+    _peakSocDuringSession = data.stateOfCharge!;
 
     // Reset charging curve samples for new session
     _currentSessionSamples = [];
@@ -522,7 +564,7 @@ class ChargingSessionService {
       id: sessionId,
       startTime: data.timestamp,
       startCumulativeCharge: startCumulative,
-      startSoc: data.stateOfCharge ?? 0,
+      startSoc: data.stateOfCharge!,  // Guaranteed non-null - checked at method start
       startOdometer: startOdo,
       isActive: true,
       chargingType: type.name,
@@ -550,7 +592,7 @@ class ChargingSessionService {
     // Publish charging started notification
     _mqttService?.publishChargingNotification(
       event: 'CHARGE_STARTED',
-      soc: data.stateOfCharge ?? 0,
+      soc: data.stateOfCharge!,  // Guaranteed non-null - checked at method start
       chargingType: type.name,
       powerKw: powerKw,
     );
