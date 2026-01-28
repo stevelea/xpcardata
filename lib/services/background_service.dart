@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
+import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'debug_logger.dart';
@@ -13,6 +14,32 @@ class BackgroundServiceManager {
   final _logger = DebugLogger.instance;
   bool _isInitialized = false;
   bool _initializationFailed = false;
+
+  // Cache the service instance to avoid repeated platform channel setup
+  FlutterBackgroundService? _serviceInstance;
+  bool _platformChannelBroken = false;
+
+  /// Safely get the background service instance
+  /// Returns null if platform channels are broken
+  FlutterBackgroundService? _getService() {
+    if (_platformChannelBroken) {
+      return null;
+    }
+    try {
+      _serviceInstance ??= FlutterBackgroundService();
+      return _serviceInstance;
+    } on MissingPluginException catch (e) {
+      _logger.log('[BackgroundService] Platform channel missing: $e');
+      _platformChannelBroken = true;
+      _initializationFailed = true;
+      return null;
+    } catch (e) {
+      _logger.log('[BackgroundService] Failed to get service: $e');
+      _platformChannelBroken = true;
+      _initializationFailed = true;
+      return null;
+    }
+  }
 
   static const String notificationChannelId = 'xpcardata_foreground';
   static const String notificationChannelName = 'XPCarData Background Service';
@@ -29,7 +56,11 @@ class BackgroundServiceManager {
   /// Initialize the background service
   Future<void> initialize() async {
     try {
-      final service = FlutterBackgroundService();
+      final service = _getService();
+      if (service == null) {
+        _logger.log('[BackgroundService] Platform channels not available');
+        return;
+      }
 
       // Create notification channel for Android
       const AndroidNotificationChannel channel = AndroidNotificationChannel(
@@ -75,6 +106,12 @@ class BackgroundServiceManager {
       _isInitialized = true;
       _initializationFailed = false;
       _logger.log('[BackgroundService] Initialized');
+    } on MissingPluginException catch (e) {
+      _logger.log('[BackgroundService] Platform channel missing during initialization: $e');
+      _logger.log('[BackgroundService] Background service will be disabled');
+      _isInitialized = false;
+      _initializationFailed = true;
+      _platformChannelBroken = true;
     } catch (e) {
       _logger.log('[BackgroundService] Initialization failed: $e');
       _logger.log('[BackgroundService] Background service will be disabled');
@@ -99,12 +136,15 @@ class BackgroundServiceManager {
       await _ensureInitialized();
 
       // If initialization failed, don't try to start
-      if (_initializationFailed) {
-        _logger.log('[BackgroundService] Cannot start - initialization failed');
+      if (_initializationFailed || _platformChannelBroken) {
+        _logger.log('[BackgroundService] Cannot start - initialization failed or platform channels broken');
         throw Exception('Background service not available on this device');
       }
 
-      final service = FlutterBackgroundService();
+      final service = _getService();
+      if (service == null) {
+        throw Exception('Background service not available on this device');
+      }
       final running = await service.isRunning();
 
       if (!running) {
@@ -123,14 +163,18 @@ class BackgroundServiceManager {
 
   /// Stop the background service
   Future<void> stop() async {
-    if (_initializationFailed) {
+    if (_initializationFailed || _platformChannelBroken) {
       return; // Nothing to stop
     }
 
     try {
-      final service = FlutterBackgroundService();
+      final service = _getService();
+      if (service == null) return;
       service.invoke('stop');
       _logger.log('[BackgroundService] Stopped');
+    } on MissingPluginException catch (e) {
+      _logger.log('[BackgroundService] Stop failed - platform channel missing: $e');
+      _platformChannelBroken = true;
     } catch (e) {
       _logger.log('[BackgroundService] Stop failed: $e');
     }
@@ -138,14 +182,19 @@ class BackgroundServiceManager {
 
   /// Check if service is running
   Future<bool> isRunning() async {
-    if (_initializationFailed) {
+    if (_initializationFailed || _platformChannelBroken) {
       return false;
     }
 
     try {
       await _ensureInitialized();
-      final service = FlutterBackgroundService();
+      final service = _getService();
+      if (service == null) return false;
       return await service.isRunning();
+    } on MissingPluginException catch (e) {
+      _logger.log('[BackgroundService] isRunning check failed - platform channel missing: $e');
+      _platformChannelBroken = true;
+      return false;
     } catch (e) {
       _logger.log('[BackgroundService] isRunning check failed: $e');
       return false;
@@ -154,16 +203,20 @@ class BackgroundServiceManager {
 
   /// Update notification content
   void updateNotification(String title, String content) {
-    if (_initializationFailed) {
+    if (_initializationFailed || _platformChannelBroken) {
       return; // Service not available
     }
 
     try {
-      final service = FlutterBackgroundService();
+      final service = _getService();
+      if (service == null) return;
       service.invoke('updateNotification', {
         'title': title,
         'content': content,
       });
+    } on MissingPluginException catch (e) {
+      _logger.log('[BackgroundService] updateNotification failed - platform channel missing: $e');
+      _platformChannelBroken = true;
     } catch (e) {
       _logger.log('[BackgroundService] updateNotification failed: $e');
     }
@@ -212,14 +265,20 @@ class BackgroundServiceManager {
       }
 
       // Try background service notification first (if running)
-      if (!_initializationFailed) {
+      if (!_initializationFailed && !_platformChannelBroken) {
         try {
-          final service = FlutterBackgroundService();
-          final isRunning = await service.isRunning();
-          if (isRunning) {
-            updateNotification(title, content);
-            return;
+          final service = _getService();
+          if (service != null) {
+            final isRunning = await service.isRunning();
+            if (isRunning) {
+              updateNotification(title, content);
+              return;
+            }
           }
+        } on MissingPluginException catch (e) {
+          // Platform channel not available - mark as broken and fall through
+          _logger.log('[BackgroundService] Platform channel missing in updateStatusNotification: $e');
+          _platformChannelBroken = true;
         } catch (_) {
           // Background service not available, fall through to direct notification
         }
