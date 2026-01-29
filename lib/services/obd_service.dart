@@ -988,12 +988,35 @@ class OBDService {
             case OBDPIDType.cellVoltages:
               // Average cell voltage - store in additional data
               additionalData['cellVoltageAvg'] = value;
-              _logger.log('[OBDService] Cell Voltage Avg: ${value.toStringAsFixed(3)} V');
+              // Also parse and store all individual cell voltages
+              final allCellVoltages = OBDPIDConfig.parseCellVoltages(response);
+              if (allCellVoltages.isNotEmpty) {
+                additionalData['cellVoltages'] = allCellVoltages;
+                final minV = allCellVoltages.reduce((a, b) => a < b ? a : b);
+                final maxV = allCellVoltages.reduce((a, b) => a > b ? a : b);
+                final deltaV = ((maxV - minV) * 1000).round(); // mV
+                _logger.log('[OBDService] Cell Voltages: ${allCellVoltages.length} cells, '
+                    'avg=${value.toStringAsFixed(3)}V, min=${minV.toStringAsFixed(3)}V, '
+                    'max=${maxV.toStringAsFixed(3)}V, delta=${deltaV}mV');
+              } else {
+                _logger.log('[OBDService] Cell Voltage Avg: ${value.toStringAsFixed(3)} V');
+              }
               break;
             case OBDPIDType.cellTemperatures:
               // Average cell temperature - store in additional data
               additionalData['cellTempAvg'] = value;
-              _logger.log('[OBDService] Cell Temp Avg: ${value.toStringAsFixed(1)} °C');
+              // Also parse and store all individual cell temperatures
+              final allCellTemps = OBDPIDConfig.parseCellTemperatures(response);
+              if (allCellTemps.isNotEmpty) {
+                additionalData['cellTemperatures'] = allCellTemps;
+                final minT = allCellTemps.reduce((a, b) => a < b ? a : b);
+                final maxT = allCellTemps.reduce((a, b) => a > b ? a : b);
+                _logger.log('[OBDService] Cell Temps: ${allCellTemps.length} sensors, '
+                    'avg=${value.toStringAsFixed(1)}°C, min=${minT.toStringAsFixed(1)}°C, '
+                    'max=${maxT.toStringAsFixed(1)}°C');
+              } else {
+                _logger.log('[OBDService] Cell Temp Avg: ${value.toStringAsFixed(1)} °C');
+              }
               break;
             case OBDPIDType.custom:
               _logger.log('[OBDService] ${pidConfig.name}: $value');

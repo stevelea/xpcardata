@@ -564,6 +564,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
 
         // Additional PIDs section
         _buildAdditionalPidsSection(data, screenWidth, isCompact, isTablet),
+
+        // Cell voltages section (expandable)
+        _buildCellVoltagesSection(data, isCompact, isTablet),
       ],
     );
   }
@@ -1560,6 +1563,200 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
           }).toList(),
         ),
       ],
+    );
+  }
+
+  /// Build cell voltages section (expandable)
+  /// Shows all individual cell voltages in a compact grid when expanded
+  Widget _buildCellVoltagesSection(VehicleData data, bool isCompact, bool isTablet) {
+    // Get cell voltages from additionalProperties
+    final cellVoltagesRaw = data.additionalProperties?['cellVoltages'];
+    if (cellVoltagesRaw == null || cellVoltagesRaw is! List || cellVoltagesRaw.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final voltages = cellVoltagesRaw.cast<double>();
+    final cellCount = voltages.length;
+
+    // Calculate stats
+    final minV = voltages.reduce((a, b) => a < b ? a : b);
+    final maxV = voltages.reduce((a, b) => a > b ? a : b);
+    final deltaV = ((maxV - minV) * 1000).round(); // mV
+
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(height: isTablet ? 16 : 8),
+        if (isTablet)
+          const DashboardSectionHeader(
+            title: 'CELL VOLTAGES',
+            icon: Icons.grid_view,
+          ),
+        Card(
+          elevation: 1,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: ExpansionTile(
+            initiallyExpanded: false,
+            tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            leading: Icon(
+              Icons.battery_std,
+              color: theme.colorScheme.primary,
+            ),
+            title: Text(
+              '$cellCount Cells',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: isCompact ? 14 : 16,
+              ),
+            ),
+            subtitle: Text(
+              'Min: ${minV.toStringAsFixed(3)}V  Max: ${maxV.toStringAsFixed(3)}V  Δ: ${deltaV}mV',
+              style: TextStyle(
+                fontSize: isCompact ? 12 : 13,
+                color: deltaV > 50 ? Colors.orange : theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            children: [
+              _buildCellVoltageGrid(voltages, minV, maxV, isCompact),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Build the grid of cell voltages with color coding
+  Widget _buildCellVoltageGrid(List<double> voltages, double minV, double maxV, bool isCompact) {
+    final theme = Theme.of(context);
+    final cellCount = voltages.length;
+    final cellSize = isCompact ? 28.0 : 32.0;
+    final fontSize = isCompact ? 9.0 : 10.0;
+
+    // Color scale: green (high) to yellow (mid) to red (low)
+    Color getVoltageColor(double v) {
+      if (maxV == minV) return Colors.green;
+      final normalized = (v - minV) / (maxV - minV); // 0 = lowest, 1 = highest
+      if (normalized > 0.8) return Colors.green;
+      if (normalized > 0.5) return Colors.lightGreen;
+      if (normalized > 0.3) return Colors.yellow.shade700;
+      if (normalized > 0.1) return Colors.orange;
+      return Colors.red;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Legend
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            children: [
+              Text(
+                'Avg: ${(voltages.reduce((a, b) => a + b) / cellCount).toStringAsFixed(3)}V',
+                style: TextStyle(
+                  fontSize: fontSize + 2,
+                  fontWeight: FontWeight.w500,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const Spacer(),
+              // Color legend
+              Container(
+                width: 12, height: 12,
+                decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(2)),
+              ),
+              const SizedBox(width: 2),
+              Text('Low', style: TextStyle(fontSize: fontSize)),
+              const SizedBox(width: 8),
+              Container(
+                width: 12, height: 12,
+                decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(2)),
+              ),
+              const SizedBox(width: 2),
+              Text('High', style: TextStyle(fontSize: fontSize)),
+            ],
+          ),
+        ),
+        // Grid of cells
+        Wrap(
+          spacing: 2,
+          runSpacing: 2,
+          children: List.generate(cellCount, (index) {
+            final v = voltages[index];
+            final color = getVoltageColor(v);
+            return Tooltip(
+              message: 'Cell ${index + 1}: ${v.toStringAsFixed(3)}V',
+              child: Container(
+                width: cellSize,
+                height: cellSize,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.8),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: v == minV
+                        ? Colors.red.shade900
+                        : v == maxV
+                            ? Colors.green.shade900
+                            : Colors.transparent,
+                    width: v == minV || v == maxV ? 2 : 0,
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  '${index + 1}',
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    fontWeight: FontWeight.w500,
+                    color: color.computeLuminance() > 0.5 ? Colors.black87 : Colors.white,
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
+        // Summary row
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildCellStatChip('Lowest', '${minV.toStringAsFixed(3)}V', Colors.red, fontSize),
+              _buildCellStatChip('Highest', '${maxV.toStringAsFixed(3)}V', Colors.green, fontSize),
+              _buildCellStatChip('Delta', '${((maxV - minV) * 1000).round()}mV',
+                  (maxV - minV) * 1000 > 50 ? Colors.orange : Colors.blue, fontSize),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Build a small stat chip for cell voltage summary
+  Widget _buildCellStatChip(String label, String value, Color color, double fontSize) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.5)),
+      ),
+      child: Column(
+        children: [
+          Text(
+            label,
+            style: TextStyle(fontSize: fontSize, color: color.withOpacity(0.8)),
+          ),
+          Text(
+            value,
+            style: TextStyle(fontSize: fontSize + 2, fontWeight: FontWeight.bold, color: color),
+          ),
+        ],
+      ),
     );
   }
 
