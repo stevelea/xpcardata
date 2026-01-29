@@ -39,7 +39,7 @@ class OBDService {
 
   // Priority-based polling: Low priority PIDs are polled every N cycles
   int _pollCycleCount = 0;
-  static const int _lowPriorityInterval = 60; // Poll low priority every 60 cycles (5 sec * 60 = 5 minutes)
+  static const int _lowPriorityInterval = 12; // Poll low priority every 12 cycles (5 sec * 12 = 1 minute)
   final Map<String, double> _lastLowPriorityValues = {}; // Cache last values for low priority PIDs
 
   // ECU wake-up tracking: retry on first poll if we get all 7F errors
