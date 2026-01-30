@@ -41,6 +41,8 @@ class OBDService {
   int _pollCycleCount = 0;
   static const int _lowPriorityInterval = 12; // Poll low priority every 12 cycles (5 sec * 12 = 1 minute)
   final Map<String, double> _lastLowPriorityValues = {}; // Cache last values for low priority PIDs
+  List<double>? _cachedCellVoltages; // Cache individual cell voltages for display between polls
+  List<double>? _cachedCellTemperatures; // Cache individual cell temperatures for display between polls
 
   // ECU wake-up tracking: retry on first poll if we get all 7F errors
   bool _ecuWakeupAttempted = false;
@@ -78,9 +80,17 @@ class OBDService {
         break;
       case OBDPIDType.cellVoltages:
         additionalData['cellVoltageAvg'] = value;
+        // Restore cached individual cell voltages for display
+        if (_cachedCellVoltages != null && _cachedCellVoltages!.isNotEmpty) {
+          additionalData['cellVoltages'] = _cachedCellVoltages;
+        }
         break;
       case OBDPIDType.cellTemperatures:
         additionalData['cellTempAvg'] = value;
+        // Restore cached individual cell temperatures for display
+        if (_cachedCellTemperatures != null && _cachedCellTemperatures!.isNotEmpty) {
+          additionalData['cellTemperatures'] = _cachedCellTemperatures;
+        }
         break;
       case OBDPIDType.custom:
         if (nameLower.contains('soh') || nameLower.contains('health')) {
@@ -992,6 +1002,7 @@ class OBDService {
               final allCellVoltages = OBDPIDConfig.parseCellVoltages(response);
               if (allCellVoltages.isNotEmpty) {
                 additionalData['cellVoltages'] = allCellVoltages;
+                _cachedCellVoltages = allCellVoltages; // Cache for display between polls
                 final minV = allCellVoltages.reduce((a, b) => a < b ? a : b);
                 final maxV = allCellVoltages.reduce((a, b) => a > b ? a : b);
                 final deltaV = ((maxV - minV) * 1000).round(); // mV
@@ -1009,6 +1020,7 @@ class OBDService {
               final allCellTemps = OBDPIDConfig.parseCellTemperatures(response);
               if (allCellTemps.isNotEmpty) {
                 additionalData['cellTemperatures'] = allCellTemps;
+                _cachedCellTemperatures = allCellTemps; // Cache for display between polls
                 final minT = allCellTemps.reduce((a, b) => a < b ? a : b);
                 final maxT = allCellTemps.reduce((a, b) => a > b ? a : b);
                 _logger.log('[OBDService] Cell Temps: ${allCellTemps.length} sensors, '
