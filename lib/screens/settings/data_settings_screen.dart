@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import '../../services/google_drive_backup_service.dart';
 import '../../services/data_usage_service.dart';
 import '../../services/database_service.dart';
+import '../live_data_screen.dart';
 
 /// Data settings sub-screen
 /// Includes: Backup & Restore, Data Management, Data Usage
@@ -370,6 +371,24 @@ class _DataSettingsScreenState extends ConsumerState<DataSettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // Live Vehicle Data Section
+          _buildSectionHeader('Live Data'),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.analytics, color: Colors.green),
+              title: const Text('Live Vehicle Data'),
+              subtitle: const Text('View all PIDs, cell voltages & temperatures'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LiveDataScreen()),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 24),
+
           // Backup & Restore Section
           _buildSectionHeader('Backup & Restore'),
           Card(
