@@ -55,68 +55,83 @@ class BackgroundServiceManager {
 
   /// Initialize the background service
   Future<void> initialize() async {
-    try {
-      final service = _getService();
-      if (service == null) {
-        _logger.log('[BackgroundService] Platform channels not available');
-        return;
-      }
-
-      // Create notification channel for Android
-      const AndroidNotificationChannel channel = AndroidNotificationChannel(
-        notificationChannelId,
-        notificationChannelName,
-        description: 'XPCarData is collecting vehicle data in the background',
-        importance: Importance.low,
-      );
-
-      final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-          FlutterLocalNotificationsPlugin();
-
+    // Use zone guard to catch any async errors that might escape try-catch
+    Object? zoneError;
+    await runZonedGuarded(() async {
       try {
-        await flutterLocalNotificationsPlugin
-            .resolvePlatformSpecificImplementation<
-                AndroidFlutterLocalNotificationsPlugin>()
-            ?.createNotificationChannel(channel);
+        final service = _getService();
+        if (service == null) {
+          _logger.log('[BackgroundService] Platform channels not available');
+          _initializationFailed = true;
+          return;
+        }
+
+        // Create notification channel for Android
+        const AndroidNotificationChannel channel = AndroidNotificationChannel(
+          notificationChannelId,
+          notificationChannelName,
+          description: 'XPCarData is collecting vehicle data in the background',
+          importance: Importance.low,
+        );
+
+        final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+            FlutterLocalNotificationsPlugin();
+
+        try {
+          await flutterLocalNotificationsPlugin
+              .resolvePlatformSpecificImplementation<
+                  AndroidFlutterLocalNotificationsPlugin>()
+              ?.createNotificationChannel(channel);
+        } catch (e) {
+          _logger.log('[BackgroundService] Notification channel creation failed: $e');
+        }
+
+        await service.configure(
+          androidConfiguration: AndroidConfiguration(
+            onStart: onStart,
+            autoStart: false, // Will be controlled by user setting
+            isForegroundMode: true,
+            notificationChannelId: notificationChannelId,
+            initialNotificationTitle: 'XPCarData',
+            initialNotificationContent: 'Collecting vehicle data...',
+            foregroundServiceNotificationId: notificationId,
+            foregroundServiceTypes: [
+              AndroidForegroundType.connectedDevice,
+              AndroidForegroundType.remoteMessaging,
+            ],
+          ),
+          iosConfiguration: IosConfiguration(
+            autoStart: false,
+            onForeground: onStart,
+            onBackground: onIosBackground,
+          ),
+        );
+
+        _isInitialized = true;
+        _initializationFailed = false;
+        _logger.log('[BackgroundService] Initialized');
+      } on MissingPluginException catch (e) {
+        _logger.log('[BackgroundService] Platform channel missing during initialization: $e');
+        _logger.log('[BackgroundService] Background service will be disabled');
+        _isInitialized = false;
+        _initializationFailed = true;
+        _platformChannelBroken = true;
       } catch (e) {
-        _logger.log('[BackgroundService] Notification channel creation failed: $e');
+        _logger.log('[BackgroundService] Initialization failed: $e');
+        _logger.log('[BackgroundService] Background service will be disabled');
+        _isInitialized = false;
+        _initializationFailed = true;
       }
-
-      await service.configure(
-        androidConfiguration: AndroidConfiguration(
-          onStart: onStart,
-          autoStart: false, // Will be controlled by user setting
-          isForegroundMode: true,
-          notificationChannelId: notificationChannelId,
-          initialNotificationTitle: 'XPCarData',
-          initialNotificationContent: 'Collecting vehicle data...',
-          foregroundServiceNotificationId: notificationId,
-          foregroundServiceTypes: [
-            AndroidForegroundType.connectedDevice,
-            AndroidForegroundType.remoteMessaging,
-          ],
-        ),
-        iosConfiguration: IosConfiguration(
-          autoStart: false,
-          onForeground: onStart,
-          onBackground: onIosBackground,
-        ),
-      );
-
-      _isInitialized = true;
-      _initializationFailed = false;
-      _logger.log('[BackgroundService] Initialized');
-    } on MissingPluginException catch (e) {
-      _logger.log('[BackgroundService] Platform channel missing during initialization: $e');
-      _logger.log('[BackgroundService] Background service will be disabled');
+    }, (error, stack) {
+      zoneError = error;
+      _logger.log('[BackgroundService] Zone caught async error during init: $error');
       _isInitialized = false;
       _initializationFailed = true;
       _platformChannelBroken = true;
-    } catch (e) {
-      _logger.log('[BackgroundService] Initialization failed: $e');
-      _logger.log('[BackgroundService] Background service will be disabled');
-      _isInitialized = false;
-      _initializationFailed = true;
+    });
+
+    if (zoneError != null) {
+      _logger.log('[BackgroundService] Initialization failed due to zone error');
     }
   }
 
@@ -265,12 +280,25 @@ class BackgroundServiceManager {
       }
 
       // Try background service notification first (if running)
-      if (!_initializationFailed && !_platformChannelBroken) {
+      // Only attempt if we've successfully initialized AND haven't seen any platform channel issues
+      if (_isInitialized && !_initializationFailed && !_platformChannelBroken) {
         try {
           final service = _getService();
           if (service != null) {
-            final isRunning = await service.isRunning();
-            if (isRunning) {
+            // Use runZonedGuarded to catch async errors that might escape try-catch
+            bool? running;
+            Object? zoneError;
+            await runZonedGuarded(() async {
+              running = await service.isRunning();
+            }, (error, stack) {
+              zoneError = error;
+              _logger.log('[BackgroundService] Zone caught error in isRunning: $error');
+            });
+
+            // If zone caught an error, mark platform as broken
+            if (zoneError != null) {
+              _platformChannelBroken = true;
+            } else if (running == true) {
               updateNotification(title, content);
               return;
             }
@@ -279,8 +307,10 @@ class BackgroundServiceManager {
           // Platform channel not available - mark as broken and fall through
           _logger.log('[BackgroundService] Platform channel missing in updateStatusNotification: $e');
           _platformChannelBroken = true;
-        } catch (_) {
-          // Background service not available, fall through to direct notification
+        } catch (e) {
+          // Background service not available, mark as broken and fall through
+          _logger.log('[BackgroundService] Error in updateStatusNotification: $e');
+          _platformChannelBroken = true;
         }
       }
 
