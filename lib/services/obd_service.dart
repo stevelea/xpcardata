@@ -44,6 +44,11 @@ class OBDService {
   List<double>? _cachedCellVoltages; // Cache individual cell voltages for display between polls
   List<double>? _cachedCellTemperatures; // Cache individual cell temperatures for display between polls
 
+  // Per-category timestamps for when data was actually polled (not cached)
+  DateTime? _cellVoltagesLastUpdated;
+  DateTime? _cellTempsLastUpdated;
+  DateTime? _lowPriorityLastUpdated; // General low priority PIDs
+
   // ECU wake-up tracking: retry on first poll if we get all 7F errors
   bool _ecuWakeupAttempted = false;
   int _consecutive7FErrorCount = 0;
@@ -708,6 +713,24 @@ class OBDService {
       await _sendCommand('ATAL');
       await Future.delayed(const Duration(milliseconds: 100));
 
+      // Enable automatic flow control for multi-frame ISO-TP responses
+      // This is critical for receiving cell voltages (221122) and temperatures (221123)
+      // which return 227+ bytes across multiple frames
+      final cfcResult = await _sendCommand('ATCFC1');
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // Set flow control data: 30=CTS (Clear To Send), 00=no block limit, 00=no delay
+      final fcsdResult = await _sendCommand('ATFCSD300000');
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // Set flow control mode to use user-defined header (ATFCSH) with standard data format
+      // Mode 1 = user-defined header, standard data format
+      // This is required for the ELM327 to actually use the ATFCSH setting
+      final fcsmResult = await _sendCommand('ATFCSM1');
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      _logger.log('[OBDService] Flow control setup: CFC1=$cfcResult, FCSD=$fcsdResult, FCSM=$fcsmResult');
+
       // Get protocol
       final protocol = await _sendCommand('ATDPN');
       _logger.log('[OBDService] Protocol: $protocol');
@@ -899,6 +922,7 @@ class OBDService {
 
       if (pollLowPriority) {
         _logger.log('[OBDService] Poll cycle $_pollCycleCount: polling ALL PIDs (including low priority)');
+        _lowPriorityLastUpdated = DateTime.now(); // Track when low priority PIDs were polled
       } else {
         _logger.log('[OBDService] Poll cycle $_pollCycleCount: polling HIGH priority PIDs only');
       }
@@ -1003,6 +1027,7 @@ class OBDService {
               if (allCellVoltages.isNotEmpty) {
                 additionalData['cellVoltages'] = allCellVoltages;
                 _cachedCellVoltages = allCellVoltages; // Cache for display between polls
+                _cellVoltagesLastUpdated = DateTime.now(); // Track when actually polled
                 final minV = allCellVoltages.reduce((a, b) => a < b ? a : b);
                 final maxV = allCellVoltages.reduce((a, b) => a > b ? a : b);
                 final deltaV = ((maxV - minV) * 1000).round(); // mV
@@ -1021,6 +1046,7 @@ class OBDService {
               if (allCellTemps.isNotEmpty) {
                 additionalData['cellTemperatures'] = allCellTemps;
                 _cachedCellTemperatures = allCellTemps; // Cache for display between polls
+                _cellTempsLastUpdated = DateTime.now(); // Track when actually polled
                 final minT = allCellTemps.reduce((a, b) => a < b ? a : b);
                 final maxT = allCellTemps.reduce((a, b) => a > b ? a : b);
                 _logger.log('[OBDService] Cell Temps: ${allCellTemps.length} sensors, '
@@ -1080,6 +1106,17 @@ class OBDService {
         await _wakeUpECUs();
         // Reset header state after wake-up so next poll re-initializes properly
         _currentEcuHeader = null;
+      }
+
+      // Add per-category timestamps for when data was actually polled
+      if (_cellVoltagesLastUpdated != null) {
+        additionalData['cellVoltagesLastUpdated'] = _cellVoltagesLastUpdated!.toIso8601String();
+      }
+      if (_cellTempsLastUpdated != null) {
+        additionalData['cellTempsLastUpdated'] = _cellTempsLastUpdated!.toIso8601String();
+      }
+      if (_lowPriorityLastUpdated != null) {
+        additionalData['lowPriorityLastUpdated'] = _lowPriorityLastUpdated!.toIso8601String();
       }
 
       return VehicleData(

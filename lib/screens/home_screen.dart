@@ -15,7 +15,6 @@ import '../services/bm300_battery_service.dart';
 import '../widgets/dashboard_widgets.dart';
 import '../models/vehicle_data.dart';
 import '../models/charging_session.dart';
-import '../models/obd_pid_config.dart';
 import 'settings_hub_screen.dart';
 import 'charging_history_screen.dart';
 import 'fleet_stats_screen.dart';
@@ -561,9 +560,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
 
         // Charging details section (when charging)
         _buildChargingDetailsSection(data, isCompact, isTablet),
-
-        // Additional PIDs section
-        _buildAdditionalPidsSection(data, screenWidth, isCompact, isTablet),
 
         // Cell voltages section (expandable)
         _buildCellVoltagesSection(data, isCompact, isTablet),
@@ -1459,110 +1455,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
           ),
         ],
       ),
-    );
-  }
-
-  /// Build additional PIDs section
-  Widget _buildAdditionalPidsSection(
-    VehicleData data,
-    double screenWidth,
-    bool isCompact,
-    bool isTablet,
-  ) {
-    if (data.additionalProperties == null || data.additionalProperties!.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    // PIDs to exclude (shown elsewhere or unsupported)
-    const excludedPids = {
-      'COOLANT_T',
-      'MOTOR_T',
-      'DC_CHG_A',
-      'DC_CHG_V',
-      'CHARGING',
-      'RANGE_EST',
-    };
-
-    final filteredEntries = data.additionalProperties!.entries
-        .where((entry) => !excludedPids.contains(entry.key))
-        .where((entry) {
-          if (entry.value is double) {
-            return !(entry.value as double).isNaN;
-          }
-          return true;
-        })
-        .toList();
-
-    if (filteredEntries.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    // Get PID configurations for priority lookup
-    final manager = ref.watch(dataSourceManagerProvider);
-    final pidConfigs = manager.obdService.customPIDs;
-
-    // Create a map of PID name to priority
-    final pidPriorityMap = <String, PIDPriority>{};
-    for (final pid in pidConfigs) {
-      pidPriorityMap[pid.name] = pid.priority;
-    }
-
-    final columns = DashboardBreakpoints.getMetricColumns(screenWidth);
-    double aspectRatio;
-    if (isCompact) {
-      aspectRatio = 2.0;
-    } else if (columns == 3) {
-      aspectRatio = 1.5;
-    } else {
-      aspectRatio = 1.3;
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(height: isTablet ? 16 : 8),
-        if (isTablet)
-          const DashboardSectionHeader(
-            title: 'ADDITIONAL DATA',
-            icon: Icons.analytics,
-          ),
-        GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: columns,
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
-          childAspectRatio: aspectRatio,
-          children: filteredEntries.map((entry) {
-            final value = entry.value is double
-                ? (entry.value as double).toStringAsFixed(1)
-                : entry.value.toString();
-            // Look up priority - default to high if not found
-            final priority = pidPriorityMap[entry.key] ?? PIDPriority.high;
-            final isLowPriority = priority == PIDPriority.low;
-            return MetricCard(
-              title: entry.key,
-              value: value,
-              unit: '',
-              isCompact: isCompact,
-              // Show priority indicator: small dot for low priority PIDs
-              trailing: isLowPriority
-                  ? Tooltip(
-                      message: 'Low priority: updates every ~5 min',
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: Colors.grey[400],
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    )
-                  : null,
-            );
-          }).toList(),
-        ),
-      ],
     );
   }
 

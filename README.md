@@ -4,7 +4,7 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![Flutter](https://img.shields.io/badge/Flutter-3.x-blue)
-![Version](https://img.shields.io/badge/version-1.3.1-orange)
+![Version](https://img.shields.io/badge/version-1.4.2-orange)
 
 ## Screenshots
 
@@ -22,12 +22,13 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 - State of Charge (SOC) %
 - State of Health (SOH) %
 - HV Battery Voltage, Current, Power
-- Max/Min Cell Voltages
+- **Individual Cell Voltages** (all 126 cells with min/max/avg/delta)
+- **Cell Temperatures** (all sensors with color-coded display)
 - Battery Temperature (Max/Min)
 - Coolant Temperatures (Battery, Motor)
 - DC Charging Voltage/Current/Power
 - Guestimated Range (calculated)
-- Speed, Odometer
+- Speed, Odometer, GPS Location
 
 ### Integrations
 - **ABRP** - Live telemetry for A Better Route Planner
@@ -41,11 +42,12 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 - **OBD Proxy** - Share data with external apps
 
 ### Additional Features
+- **Live Data Screen** - Detailed view of all PIDs, cell voltages & temperatures
 - **Backup & Restore** - Export/import settings and charging history
 - Background service for continuous monitoring
 - Charging session detection and history
 - **OpenChargeMap integration** - Auto-lookup charger names from GPS coordinates
-- Priority-based PID polling (reduces OBD traffic by ~50%)
+- **Priority-based PID polling** - High priority ~5 sec, low priority ~1 min (reduces OBD traffic)
 - Tailscale VPN control from settings
 - In-app updates via GitHub
 - Location services for enhanced ABRP data
@@ -57,10 +59,10 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 ### Download
 Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcardata/releases).
 
-**Current Version:** v1.3.1
+**Current Version:** v1.4.2
 
-1. Download `XPCarData-v1.3.1.zip` from the [latest release](https://github.com/stevelea/xpcardata/releases/latest)
-2. Extract the ZIP file to get `XPCarData-v1.3.1.apk`
+1. Download `XPCarData-v1.4.2.zip` from the [latest release](https://github.com/stevelea/xpcardata/releases/latest)
+2. Extract the ZIP file to get `XPCarData-v1.4.2.apk`
 3. Install the APK on your Android device (enable "Install from unknown sources" if prompted)
 
 ### Requirements
@@ -94,6 +96,15 @@ Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcard
 2. Configure broker address (use Tailscale IP for remote access)
 3. Enable Home Assistant Discovery for automatic entity creation
 4. Entities appear under "XPCarData {Vehicle ID}" device
+
+**Sensor Attributes:** Each sensor includes:
+- `priority`: "high" (~5 sec polling) or "low" (~1 min polling)
+- `last_collected`: ISO 8601 timestamp of when data was polled
+
+```yaml
+# Example: Check when SOH was last updated
+{{ state_attr('sensor.xpcardata_soh', 'last_collected') }}
+```
 
 **Companion Integration:** For advanced charging history tracking in Home Assistant, see the [XPENG Charging History Integration](https://github.com/stevelea/ha-xpeng-charging-history) - a custom component that stores and displays charging sessions with energy costs and statistics.
 
@@ -144,7 +155,18 @@ Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcard
 
 ## Version History
 
-### v1.3.1 (Current)
+### v1.4.2 (Current)
+- **Per-sensor MQTT timestamps** - Each sensor includes `priority` and `last_collected` attributes
+- **New sensors** - Cell Voltage Avg, Cell Temp Avg with dedicated timestamps
+- **Dashboard cleanup** - Removed redundant Additional Data section
+- **Live Data screen** - New detailed view for all PIDs, cell voltages & temperatures
+- **Update check fix** - Added timeout to prevent indefinite spinning on rate limit
+
+### v1.4.0
+- **Dashboard improvements** - Cleaner layout with expandable cell voltage section
+- **High/Low priority polling** - High priority ~5 sec, low priority ~1 min to reduce OBD traffic
+
+### v1.3.1
 - **Backup & Restore** - Export/import settings and charging history
 - **Reorganized Settings** - Category tiles for easier navigation (Connections, Integrations, Vehicle, Data, App, About)
 

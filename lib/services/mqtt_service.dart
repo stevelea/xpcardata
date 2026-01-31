@@ -446,6 +446,14 @@ class MqttService {
       'sw_version': _appVersion,
     };
 
+    // Attribute templates for timestamps based on priority
+    // High priority: uses main timestamp (updates every ~5 sec)
+    // Low priority: uses lowPriorityLastUpdated (updates every ~1 min)
+    const highPriorityAttrs = '{"priority": "high", "last_collected": "{{ value_json.timestamp }}"}';
+    const lowPriorityAttrs = '{"priority": "low", "last_collected": "{{ value_json.lowPriorityLastUpdated | default(value_json.timestamp) }}"}';
+    const cellVoltageAttrs = '{"priority": "low", "last_collected": "{{ value_json.cellVoltagesLastUpdated | default(value_json.timestamp) }}"}';
+    const cellTempAttrs = '{"priority": "low", "last_collected": "{{ value_json.cellTempsLastUpdated | default(value_json.timestamp) }}"}';
+
     // Define all sensors with their configurations
     final sensors = <Map<String, dynamic>>[
       {
@@ -454,6 +462,7 @@ class MqttService {
         'device_class': 'battery',
         'unit_of_measurement': '%',
         'value_template': '{{ value_json.stateOfCharge | default(0) | round(1) }}',
+        'json_attributes_template': highPriorityAttrs,
         'icon': 'mdi:battery',
         'state_class': 'measurement',
       },
@@ -463,6 +472,7 @@ class MqttService {
         'device_class': 'battery',
         'unit_of_measurement': '%',
         'value_template': '{{ value_json.stateOfHealth | default(0) | round(1) }}',
+        'json_attributes_template': lowPriorityAttrs,
         'icon': 'mdi:battery-heart-variant',
         'state_class': 'measurement',
       },
@@ -472,6 +482,7 @@ class MqttService {
         'device_class': 'voltage',
         'unit_of_measurement': 'V',
         'value_template': '{{ value_json.batteryVoltage | default(0) | round(1) }}',
+        'json_attributes_template': highPriorityAttrs,
         'state_class': 'measurement',
       },
       {
@@ -480,6 +491,7 @@ class MqttService {
         'device_class': 'current',
         'unit_of_measurement': 'A',
         'value_template': '{{ value_json.batteryCurrent | default(0) | round(1) }}',
+        'json_attributes_template': highPriorityAttrs,
         'state_class': 'measurement',
       },
       {
@@ -488,6 +500,7 @@ class MqttService {
         'device_class': 'temperature',
         'unit_of_measurement': '°C',
         'value_template': '{{ value_json.batteryTemperature | default(0) | round(1) }}',
+        'json_attributes_template': highPriorityAttrs,
         'state_class': 'measurement',
       },
       {
@@ -496,6 +509,7 @@ class MqttService {
         'device_class': 'power',
         'unit_of_measurement': 'kW',
         'value_template': '{{ value_json.power | default(0) | round(2) }}',
+        'json_attributes_template': highPriorityAttrs,
         'state_class': 'measurement',
       },
       {
@@ -504,6 +518,7 @@ class MqttService {
         'device_class': 'distance',
         'unit_of_measurement': 'km',
         'value_template': '{{ value_json.range | default(0) | round(0) }}',
+        'json_attributes_template': highPriorityAttrs,
         'icon': 'mdi:map-marker-distance',
         'state_class': 'measurement',
       },
@@ -513,6 +528,7 @@ class MqttService {
         'device_class': 'speed',
         'unit_of_measurement': 'km/h',
         'value_template': '{{ value_json.speed | default(0) | round(0) }}',
+        'json_attributes_template': highPriorityAttrs,
         'state_class': 'measurement',
       },
       {
@@ -521,6 +537,7 @@ class MqttService {
         'device_class': 'distance',
         'unit_of_measurement': 'km',
         'value_template': '{{ value_json.odometer | default(0) | round(0) }}',
+        'json_attributes_template': lowPriorityAttrs,
         'icon': 'mdi:counter',
         'state_class': 'total_increasing',
       },
@@ -530,6 +547,7 @@ class MqttService {
         'device_class': 'energy_storage',
         'unit_of_measurement': 'kWh',
         'value_template': '{{ value_json.batteryCapacity | default(0) | round(1) }}',
+        'json_attributes_template': lowPriorityAttrs,
         'icon': 'mdi:battery-high',
         'state_class': 'measurement',
       },
@@ -538,6 +556,7 @@ class MqttService {
         'object_id': 'latitude',
         'unit_of_measurement': '°',
         'value_template': '{{ value_json.latitude | default(0) | round(6) }}',
+        'json_attributes_template': highPriorityAttrs,
         'icon': 'mdi:crosshairs-gps',
         'state_class': 'measurement',
       },
@@ -546,6 +565,7 @@ class MqttService {
         'object_id': 'longitude',
         'unit_of_measurement': '°',
         'value_template': '{{ value_json.longitude | default(0) | round(6) }}',
+        'json_attributes_template': highPriorityAttrs,
         'icon': 'mdi:crosshairs-gps',
         'state_class': 'measurement',
       },
@@ -554,6 +574,7 @@ class MqttService {
         'object_id': 'altitude',
         'unit_of_measurement': 'm',
         'value_template': '{{ value_json.altitude | default(0) | round(0) }}',
+        'json_attributes_template': highPriorityAttrs,
         'icon': 'mdi:altimeter',
         'state_class': 'measurement',
       },
@@ -563,6 +584,7 @@ class MqttService {
         'device_class': 'speed',
         'unit_of_measurement': 'km/h',
         'value_template': '{{ value_json.gpsSpeed | default(0) | round(0) }}',
+        'json_attributes_template': highPriorityAttrs,
         'state_class': 'measurement',
       },
       {
@@ -570,6 +592,7 @@ class MqttService {
         'object_id': 'heading',
         'unit_of_measurement': '°',
         'value_template': '{{ value_json.heading | default(0) | round(0) }}',
+        'json_attributes_template': highPriorityAttrs,
         'icon': 'mdi:compass',
         'state_class': 'measurement',
       },
@@ -577,14 +600,35 @@ class MqttService {
         'name': 'Charging Status',
         'object_id': 'charging_status',
         'value_template': '{{ value_json.chargingStatus | default("Unknown") }}',
+        'json_attributes_template': highPriorityAttrs,
         'icon': 'mdi:ev-station',
       },
       {
-        'name': 'Local Time',
-        'object_id': 'local_time',
+        'name': 'Cell Voltage Avg',
+        'object_id': 'cell_voltage_avg',
+        'device_class': 'voltage',
+        'unit_of_measurement': 'V',
+        'value_template': '{{ value_json.cellVoltageAvg | default(0) | round(3) }}',
+        'json_attributes_template': cellVoltageAttrs,
+        'icon': 'mdi:battery-outline',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Cell Temp Avg',
+        'object_id': 'cell_temp_avg',
+        'device_class': 'temperature',
+        'unit_of_measurement': '°C',
+        'value_template': '{{ value_json.cellTempAvg | default(0) | round(1) }}',
+        'json_attributes_template': cellTempAttrs,
+        'icon': 'mdi:thermometer',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Last Data Collection',
+        'object_id': 'last_data_collection',
         'device_class': 'timestamp',
-        'value_template': '{{ value_json.localTime | default("") }}',
-        'icon': 'mdi:clock-outline',
+        'value_template': '{{ value_json.timestamp | default("") }}',
+        'icon': 'mdi:clock-check-outline',
       },
     ];
 
@@ -607,6 +651,11 @@ class MqttService {
         'value_template': sensor['value_template'],
         'state_class': sensor['state_class'],
         if (sensor.containsKey('icon')) 'icon': sensor['icon'],
+        // Include json_attributes for sensors that have them (priority + last_collected timestamp)
+        if (sensor.containsKey('json_attributes_template')) ...{
+          'json_attributes_topic': stateTopic,
+          'json_attributes_template': sensor['json_attributes_template'],
+        },
       };
 
       _publishMessage(

@@ -9,7 +9,7 @@ import 'hive_storage_service.dart';
 
 /// Hardcoded app version (updated during build)
 /// This avoids package_info_plus which fails on AAOS
-const String appVersion = '1.3.98';
+const String appVersion = '1.4.2';
 
 /// Service for checking and downloading updates from GitHub releases
 class GitHubUpdateService {
@@ -207,6 +207,12 @@ class GitHubUpdateService {
       final response = await http.get(
         Uri.parse(_apiUrl),
         headers: headers,
+      ).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          debugPrint('[Update] Request timed out');
+          throw Exception('Request timed out');
+        },
       );
 
       debugPrint('[Update] Response status: ${response.statusCode}');

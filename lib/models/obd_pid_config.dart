@@ -463,8 +463,9 @@ class OBDPIDConfig {
           if (hexByte == 'FF') continue; // Skip padding
           if (RegExp(r'^[0-9A-F]{2}$').hasMatch(hexByte)) {
             final rawValue = int.parse(hexByte, radix: 16);
-            // Convert to voltage: value * 0.02 + 2.0V (gives ~3.7V for 0xB9=185)
-            final voltage = rawValue * 0.02 + 2.0;
+            // Convert to voltage: value * 0.02 (no offset)
+            // Raw 0xBF (191) = 3.82V, 0xC0 (192) = 3.84V
+            final voltage = rawValue * 0.02;
             if (voltage >= 2.5 && voltage <= 4.5) {
               voltages.add(voltage);
             }
@@ -485,7 +486,8 @@ class OBDPIDConfig {
           if (hexByte == 'FF' || hexByte == '55') continue; // Skip padding
           if (RegExp(r'^[0-9A-F]{2}$').hasMatch(hexByte)) {
             final rawValue = int.parse(hexByte, radix: 16);
-            final voltage = rawValue * 0.02 + 2.0;
+            // Convert to voltage: value * 0.02 (no offset)
+            final voltage = rawValue * 0.02;
             if (voltage >= 2.5 && voltage <= 4.5) {
               voltages.add(voltage);
             }
