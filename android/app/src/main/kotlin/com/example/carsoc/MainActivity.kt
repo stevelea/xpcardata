@@ -120,8 +120,21 @@ class MainActivity : FlutterActivity() {
                     "connect" -> {
                         val address = call.argument<String>("address")
                         if (address != null) {
-                            val connected = bluetoothHelper.connect(address)
-                            result.success(connected)
+                            // Use async connect to avoid main thread blocking and native crashes
+                            bluetoothHelper.connectAsync(address, object : BluetoothHelper.ConnectCallback {
+                                override fun onSuccess() {
+                                    // Post result back to main thread for Flutter
+                                    activity?.runOnUiThread {
+                                        result.success(true)
+                                    }
+                                }
+                                override fun onError(message: String) {
+                                    // Post error back to main thread for Flutter
+                                    activity?.runOnUiThread {
+                                        result.error("CONNECTION_FAILED", message, null)
+                                    }
+                                }
+                            })
                         } else {
                             result.error("INVALID_ARGUMENT", "Address is required", null)
                         }

@@ -15,8 +15,17 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class BluetoothHelper(private val context: Context, private val activity: Activity?) {
+    // Background executor for Bluetooth operations to avoid blocking main thread
+    // and prevent native crashes from taking down the app
+    private val executor = Executors.newSingleThreadExecutor()
+
+    // Connection timeout in seconds
+    private val CONNECTION_TIMEOUT_SECONDS = 15L
     private val bluetoothManager: BluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
     private var socket: BluetoothSocket? = null
@@ -99,7 +108,107 @@ class BluetoothHelper(private val context: Context, private val activity: Activi
         return devices
     }
 
+    /**
+     * Callback interface for async Bluetooth operations
+     */
+    interface ConnectCallback {
+        fun onSuccess()
+        fun onError(message: String)
+    }
+
+    /**
+     * Connect to a Bluetooth device asynchronously on a background thread.
+     * This prevents native Bluetooth crashes from taking down the main thread/app.
+     *
+     * @param address The MAC address of the device
+     * @param callback Callback for success/error
+     */
+    fun connectAsync(address: String, callback: ConnectCallback) {
+        if (!hasPermissions()) {
+            callback.onError("Bluetooth permissions not granted")
+            return
+        }
+
+        executor.submit {
+            try {
+                android.util.Log.d("BluetoothHelper", "Starting async connect to $address")
+
+                // Ensure any previous connection is closed
+                disconnect()
+
+                // Give OS time to release the socket
+                Thread.sleep(300)
+
+                val device = bluetoothAdapter?.getRemoteDevice(address)
+                if (device == null) {
+                    android.util.Log.e("BluetoothHelper", "Failed to get remote device")
+                    callback.onError("Failed to get remote device")
+                    return@submit
+                }
+
+                socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+
+                // Set a timeout for the connection attempt using a watchdog thread
+                val connectionComplete = AtomicBoolean(false)
+                val connectionThread = Thread.currentThread()
+
+                // Watchdog that will close socket if connection takes too long
+                val watchdog = Thread {
+                    try {
+                        Thread.sleep(CONNECTION_TIMEOUT_SECONDS * 1000)
+                        if (!connectionComplete.get()) {
+                            android.util.Log.w("BluetoothHelper", "Connection timeout - closing socket")
+                            try {
+                                socket?.close()
+                            } catch (e: Exception) {
+                                // Ignore close errors
+                            }
+                        }
+                    } catch (e: InterruptedException) {
+                        // Watchdog was cancelled, connection completed
+                    }
+                }
+                watchdog.start()
+
+                try {
+                    // Attempt connection - this can crash with native exception
+                    socket?.connect()
+                    connectionComplete.set(true)
+                    watchdog.interrupt() // Cancel watchdog
+
+                    inputStream = socket?.inputStream
+                    outputStream = socket?.outputStream
+
+                    val connected = socket?.isConnected ?: false
+                    if (connected) {
+                        android.util.Log.d("BluetoothHelper", "Connection successful")
+                        callback.onSuccess()
+                    } else {
+                        android.util.Log.e("BluetoothHelper", "Socket not connected after connect()")
+                        disconnect()
+                        callback.onError("Connection failed - socket not connected")
+                    }
+                } catch (e: IOException) {
+                    connectionComplete.set(true)
+                    watchdog.interrupt()
+                    android.util.Log.e("BluetoothHelper", "Connection IOException: ${e.message}")
+                    disconnect()
+                    callback.onError("Connection failed: ${e.message}")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("BluetoothHelper", "Connection error: ${e.message}")
+                disconnect()
+                callback.onError("Connection error: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Synchronous connect - kept for backwards compatibility but should avoid using.
+     * Use connectAsync() instead to prevent main thread blocking and native crashes.
+     */
     @Throws(SecurityException::class, IOException::class)
+    @Deprecated("Use connectAsync() to avoid main thread blocking and native crashes")
     fun connect(address: String): Boolean {
         if (!hasPermissions()) {
             throw SecurityException("Bluetooth permissions not granted")

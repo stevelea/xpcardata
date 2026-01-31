@@ -9,7 +9,7 @@ import 'hive_storage_service.dart';
 
 /// Hardcoded app version (updated during build)
 /// This avoids package_info_plus which fails on AAOS
-const String appVersion = '1.4.2';
+const String appVersion = '1.4.3';
 
 /// Service for checking and downloading updates from GitHub releases
 class GitHubUpdateService {
