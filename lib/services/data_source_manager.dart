@@ -535,7 +535,9 @@ class DataSourceManager {
   void _publishToMqtt(VehicleData data) {
     if (_mqttService != null) {
       if (_mqttService.isConnected) {
-        _mqttService.publishVehicleData(data).catchError((error) {
+        // Include data source in the published data for debugging
+        final dataSourceName = _currentSource != null ? getSourceName(_currentSource!) : 'unknown';
+        _mqttService.publishVehicleData(data, dataSource: dataSourceName).catchError((error) {
           // Silently handle MQTT publish errors
         });
       }

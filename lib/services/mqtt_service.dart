@@ -180,7 +180,8 @@ class MqttService {
   }
 
   /// Publish vehicle data to MQTT (single topic with all data)
-  Future<void> publishVehicleData(VehicleData data) async {
+  /// [dataSource] identifies where the data came from (obd, mock, proxy, carInfo)
+  Future<void> publishVehicleData(VehicleData data, {String? dataSource}) async {
     if (!isConnected || _vehicleId == null) {
       return;
     }
@@ -192,6 +193,11 @@ class MqttService {
       // Fill in battery capacity from user settings if not provided by OBD
       if (json['batteryCapacity'] == null || json['batteryCapacity'] == 0) {
         json['batteryCapacity'] = await _getBatteryCapacityFromSettings();
+      }
+
+      // Include data source for debugging (helps identify where data is coming from)
+      if (dataSource != null) {
+        json['dataSource'] = dataSource;
       }
 
       final payload = jsonEncode(json);
@@ -609,6 +615,13 @@ class MqttService {
         'value_template': '{{ value_json.chargingStatusDescription | default("Not Charging") }}',
         'json_attributes_template': highPriorityAttrs,
         'icon': 'mdi:ev-station',
+      },
+      {
+        'name': 'Data Source',
+        'object_id': 'data_source',
+        'value_template': '{{ value_json.dataSource | default("unknown") }}',
+        'json_attributes_template': highPriorityAttrs,
+        'icon': 'mdi:database',
       },
       {
         'name': 'Cell Voltage Avg',
