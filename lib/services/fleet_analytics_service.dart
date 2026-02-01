@@ -422,9 +422,25 @@ class FleetAnalyticsService {
     _lastBatteryUpload = now;
 
     try {
+      // Validate and clamp values to valid ranges before bucketing
+      // SOC: 0-100%, SOH: 0-100% (values outside are sensor errors)
+      final validSoc = data.stateOfCharge != null
+          ? data.stateOfCharge!.clamp(0.0, 100.0)
+          : null;
+      final validSoh = data.stateOfHealth != null
+          ? data.stateOfHealth!.clamp(0.0, 100.0)
+          : null;
+
+      // Skip recording if SOH is clearly invalid (original value > 100% or < 0%)
+      if (data.stateOfHealth != null &&
+          (data.stateOfHealth! > 100.0 || data.stateOfHealth! < 0.0)) {
+        _logger.log('[FleetAnalytics] Skipping invalid SOH: ${data.stateOfHealth}%');
+        return;
+      }
+
       // Bucket values for anonymity (5% increments for SOC/SOH)
-      final socBucket = _bucketValue(data.stateOfCharge, 5);
-      final sohBucket = _bucketValue(data.stateOfHealth, 5);
+      final socBucket = _bucketValue(validSoc, 5);
+      final sohBucket = _bucketValue(validSoh, 5);
       final tempRange = _getTemperatureRange(data.batteryTemperature);
 
       // Calculate cell voltage delta if available
@@ -665,7 +681,8 @@ class FleetAnalyticsService {
         if (deviceId != null) uniqueDevices.add(deviceId);
 
         final sohBucket = data['soh_bucket'];
-        if (sohBucket != null && sohBucket is int && sohBucket > 0) {
+        // Only include valid SOH values (0-100%, reject > 100% as bad data)
+        if (sohBucket != null && sohBucket is int && sohBucket > 0 && sohBucket <= 100) {
           final key = sohBucket.toString();
           sohDistribution[key] = (sohDistribution[key] ?? 0) + 1;
           sohSum += sohBucket;
