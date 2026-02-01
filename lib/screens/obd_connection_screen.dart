@@ -150,13 +150,16 @@ class _OBDConnectionScreenState extends State<OBDConnectionScreen> {
   }
 
   Future<void> _connectToDevice(NativeBluetoothDevice device) async {
+    if (!mounted) return;
     setState(() => _isConnecting = true);
 
     final success = await widget.obdService.connect(device.address);
 
+    // Check if widget is still mounted before updating state
+    if (!mounted) return;
     setState(() => _isConnecting = false);
 
-    if (success && mounted) {
+    if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Connected to ${device.displayName}'),
@@ -164,7 +167,7 @@ class _OBDConnectionScreenState extends State<OBDConnectionScreen> {
         ),
       );
       Navigator.pop(context, true);
-    } else if (mounted) {
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Failed to connect to OBD adapter'),
