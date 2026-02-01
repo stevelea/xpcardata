@@ -455,10 +455,11 @@ class MqttService {
     // Attribute templates for timestamps based on priority
     // High priority: uses main timestamp (updates every ~5 sec)
     // Low priority: uses lowPriorityLastUpdated (updates every ~1 min)
-    const highPriorityAttrs = '{"priority": "high", "last_collected": "{{ value_json.timestamp }}"}';
-    const lowPriorityAttrs = '{"priority": "low", "last_collected": "{{ value_json.lowPriorityLastUpdated | default(value_json.timestamp) }}"}';
-    const cellVoltageAttrs = '{"priority": "low", "last_collected": "{{ value_json.cellVoltagesLastUpdated | default(value_json.timestamp) }}"}';
-    const cellTempAttrs = '{"priority": "low", "last_collected": "{{ value_json.cellTempsLastUpdated | default(value_json.timestamp) }}"}';
+    // All include data_source so users can see where each sensor's data came from
+    const highPriorityAttrs = '{"priority": "high", "last_collected": "{{ value_json.timestamp }}", "data_source": "{{ value_json.dataSource | default(\'unknown\') }}"}';
+    const lowPriorityAttrs = '{"priority": "low", "last_collected": "{{ value_json.lowPriorityLastUpdated | default(value_json.timestamp) }}", "data_source": "{{ value_json.dataSource | default(\'unknown\') }}"}';
+    const cellVoltageAttrs = '{"priority": "low", "last_collected": "{{ value_json.cellVoltagesLastUpdated | default(value_json.timestamp) }}", "data_source": "{{ value_json.dataSource | default(\'unknown\') }}"}';
+    const cellTempAttrs = '{"priority": "low", "last_collected": "{{ value_json.cellTempsLastUpdated | default(value_json.timestamp) }}", "data_source": "{{ value_json.dataSource | default(\'unknown\') }}"}';
 
     // Define all sensors with their configurations
     final sensors = <Map<String, dynamic>>[

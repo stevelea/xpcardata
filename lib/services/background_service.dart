@@ -57,12 +57,30 @@ class BackgroundServiceManager {
   Future<void> initialize() async {
     // Use zone guard to catch any async errors that might escape try-catch
     Object? zoneError;
-    await runZonedGuarded(() async {
+
+    // Use a completer to track completion and handle timeout
+    final completer = Completer<void>();
+
+    // Set a timeout to prevent hanging if plugin is broken
+    Timer? timeoutTimer;
+    timeoutTimer = Timer(const Duration(seconds: 5), () {
+      if (!completer.isCompleted) {
+        _logger.log('[BackgroundService] Initialization timed out - plugin likely broken');
+        _isInitialized = false;
+        _initializationFailed = true;
+        _platformChannelBroken = true;
+        completer.complete();
+      }
+    });
+
+    runZonedGuarded(() async {
       try {
         final service = _getService();
         if (service == null) {
           _logger.log('[BackgroundService] Platform channels not available');
           _initializationFailed = true;
+          timeoutTimer?.cancel();
+          if (!completer.isCompleted) completer.complete();
           return;
         }
 
@@ -86,41 +104,59 @@ class BackgroundServiceManager {
           _logger.log('[BackgroundService] Notification channel creation failed: $e');
         }
 
-        await service.configure(
-          androidConfiguration: AndroidConfiguration(
-            onStart: onStart,
-            autoStart: false, // Will be controlled by user setting
-            isForegroundMode: true,
-            notificationChannelId: notificationChannelId,
-            initialNotificationTitle: 'XPCarData',
-            initialNotificationContent: 'Collecting vehicle data...',
-            foregroundServiceNotificationId: notificationId,
-            foregroundServiceTypes: [
-              AndroidForegroundType.connectedDevice,
-              AndroidForegroundType.remoteMessaging,
-            ],
-          ),
-          iosConfiguration: IosConfiguration(
-            autoStart: false,
-            onForeground: onStart,
-            onBackground: onIosBackground,
-          ),
-        );
+        // Configure the service - this can fail on AI boxes
+        try {
+          await service.configure(
+            androidConfiguration: AndroidConfiguration(
+              onStart: onStart,
+              autoStart: false, // Will be controlled by user setting
+              isForegroundMode: true,
+              notificationChannelId: notificationChannelId,
+              initialNotificationTitle: 'XPCarData',
+              initialNotificationContent: 'Collecting vehicle data...',
+              foregroundServiceNotificationId: notificationId,
+              foregroundServiceTypes: [
+                AndroidForegroundType.connectedDevice,
+                AndroidForegroundType.remoteMessaging,
+              ],
+            ),
+            iosConfiguration: IosConfiguration(
+              autoStart: false,
+              onForeground: onStart,
+              onBackground: onIosBackground,
+            ),
+          );
+        } on MissingPluginException catch (e) {
+          _logger.log('[BackgroundService] Configure failed - platform channel missing: $e');
+          _platformChannelBroken = true;
+          _initializationFailed = true;
+          _isInitialized = false;
+          timeoutTimer?.cancel();
+          if (!completer.isCompleted) completer.complete();
+          return;
+        }
 
         _isInitialized = true;
         _initializationFailed = false;
         _logger.log('[BackgroundService] Initialized');
+
+        timeoutTimer?.cancel();
+        if (!completer.isCompleted) completer.complete();
       } on MissingPluginException catch (e) {
         _logger.log('[BackgroundService] Platform channel missing during initialization: $e');
         _logger.log('[BackgroundService] Background service will be disabled');
         _isInitialized = false;
         _initializationFailed = true;
         _platformChannelBroken = true;
+        timeoutTimer?.cancel();
+        if (!completer.isCompleted) completer.complete();
       } catch (e) {
         _logger.log('[BackgroundService] Initialization failed: $e');
         _logger.log('[BackgroundService] Background service will be disabled');
         _isInitialized = false;
         _initializationFailed = true;
+        timeoutTimer?.cancel();
+        if (!completer.isCompleted) completer.complete();
       }
     }, (error, stack) {
       zoneError = error;
@@ -128,7 +164,11 @@ class BackgroundServiceManager {
       _isInitialized = false;
       _initializationFailed = true;
       _platformChannelBroken = true;
+      timeoutTimer?.cancel();
+      if (!completer.isCompleted) completer.complete();
     });
+
+    await completer.future;
 
     if (zoneError != null) {
       _logger.log('[BackgroundService] Initialization failed due to zone error');
@@ -395,39 +435,57 @@ Future<void> onStart(ServiceInstance service) async {
     final logger = DebugLogger.instance;
     logger.log('[BackgroundService] Service started in isolate');
 
-    // Handle stop command - wrap in try-catch for AI box compatibility
-    try {
-      service.on('stop').listen((event) {
-        try {
-          service.stopSelf();
-          logger.log('[BackgroundService] Service stopped by command');
-        } catch (e) {
-          logger.log('[BackgroundService] stopSelf error: $e');
-        }
-      });
-    } catch (e) {
-      logger.log('[BackgroundService] Failed to register stop listener: $e');
+    // Track if platform channels are working
+    bool platformChannelsWorking = true;
+
+    // Helper to safely subscribe to service events
+    // Returns false if subscription fails (platform channels broken)
+    bool safeSubscribe(String eventName, void Function(Map<String, dynamic>?) handler) {
+      try {
+        final stream = service.on(eventName);
+        stream.listen(
+          handler,
+          onError: (error) {
+            logger.log('[BackgroundService] Stream error on $eventName: $error');
+          },
+          cancelOnError: false,
+        );
+        return true;
+      } on MissingPluginException catch (e) {
+        logger.log('[BackgroundService] Platform channel missing for $eventName: $e');
+        platformChannelsWorking = false;
+        return false;
+      } catch (e) {
+        logger.log('[BackgroundService] Failed to subscribe to $eventName: $e');
+        return false;
+      }
     }
 
+    // Handle stop command - wrap in try-catch for AI box compatibility
+    safeSubscribe('stop', (event) {
+      try {
+        service.stopSelf();
+        logger.log('[BackgroundService] Service stopped by command');
+      } catch (e) {
+        logger.log('[BackgroundService] stopSelf error: $e');
+      }
+    });
+
     // Handle notification update - wrap in try-catch for AI box compatibility
-    try {
-      service.on('updateNotification').listen((event) {
-        try {
-          if (service is AndroidServiceInstance) {
-            final title = event?['title'] ?? 'XPCarData';
-            final content = event?['content'] ?? 'Collecting vehicle data...';
-            service.setForegroundNotificationInfo(
-              title: title,
-              content: content,
-            );
-          }
-        } catch (e) {
-          logger.log('[BackgroundService] setForegroundNotificationInfo error: $e');
+    safeSubscribe('updateNotification', (event) {
+      try {
+        if (service is AndroidServiceInstance) {
+          final title = event?['title'] ?? 'XPCarData';
+          final content = event?['content'] ?? 'Collecting vehicle data...';
+          service.setForegroundNotificationInfo(
+            title: title,
+            content: content,
+          );
         }
-      });
-    } catch (e) {
-      logger.log('[BackgroundService] Failed to register notification listener: $e');
-    }
+      } catch (e) {
+        logger.log('[BackgroundService] setForegroundNotificationInfo error: $e');
+      }
+    });
 
     // Set as foreground service on Android - wrap in try-catch for AI box compatibility
     try {
@@ -436,6 +494,18 @@ Future<void> onStart(ServiceInstance service) async {
       }
     } catch (e) {
       logger.log('[BackgroundService] Failed to set foreground service: $e');
+    }
+
+    // If platform channels aren't working, don't start the timer loop
+    // as it will just generate errors
+    if (!platformChannelsWorking) {
+      logger.log('[BackgroundService] Platform channels broken, stopping service loop');
+      try {
+        service.stopSelf();
+      } catch (e) {
+        logger.log('[BackgroundService] Failed to stop self: $e');
+      }
+      return;
     }
 
     // Main background loop - wrap all operations in try-catch
