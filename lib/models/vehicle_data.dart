@@ -110,13 +110,22 @@ class VehicleData {
     final bool powerIndicatesCharging = (power ?? 0) < -0.5;
     final bool isCharging = isStationary && (currentIndicatesCharging || powerIndicatesCharging);
 
-    // Determine charging type based on power level
+    // IEC 61851 charging status codes:
+    // A = Standby (not connected/not charging)
+    // B = Vehicle detected (connected but not charging) - cannot detect from OBD
+    // C = Ready/Charging (charging in progress)
+    // D = With ventilation (not applicable)
+    // E = No power (not applicable)
+    // F = Error (not applicable)
     String chargingStatus;
+    String chargingStatusDescription;
     if (isCharging) {
+      chargingStatus = 'C'; // IEC 61851 Status C = Charging
       final absPower = (power ?? 0).abs();
-      chargingStatus = absPower > 11.0 ? 'DC Charging' : 'AC Charging';
+      chargingStatusDescription = absPower > 11.0 ? 'DC Charging' : 'AC Charging';
     } else {
-      chargingStatus = 'Not Charging';
+      chargingStatus = 'A'; // IEC 61851 Status A = Standby
+      chargingStatusDescription = 'Not Charging';
     }
 
     // Format local time in human-readable format
@@ -143,6 +152,7 @@ class VehicleData {
       'gpsSpeed': gpsSpeed,
       'heading': heading,
       'chargingStatus': chargingStatus,
+      'chargingStatusDescription': chargingStatusDescription,
       'isCharging': isCharging,
       if (additionalProperties != null) ...additionalProperties!,
     };

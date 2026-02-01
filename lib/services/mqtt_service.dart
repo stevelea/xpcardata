@@ -599,7 +599,14 @@ class MqttService {
       {
         'name': 'Charging Status',
         'object_id': 'charging_status',
-        'value_template': '{{ value_json.chargingStatus | default("Unknown") }}',
+        'value_template': '{{ value_json.chargingStatus | default("A") }}',
+        'json_attributes_template': highPriorityAttrs,
+        'icon': 'mdi:ev-station',
+      },
+      {
+        'name': 'Charging Status Description',
+        'object_id': 'charging_status_description',
+        'value_template': '{{ value_json.chargingStatusDescription | default("Not Charging") }}',
         'json_attributes_template': highPriorityAttrs,
         'icon': 'mdi:ev-station',
       },
