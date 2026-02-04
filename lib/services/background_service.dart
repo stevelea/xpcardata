@@ -41,6 +41,28 @@ class BackgroundServiceManager {
     }
   }
 
+  /// Pre-flight check: test if the background service platform channel works
+  /// by calling isRunning(). If it throws, platform channels are broken.
+  Future<bool> _preFlightCheck() async {
+    try {
+      final service = _getService();
+      if (service == null) return false;
+      // This will throw MissingPluginException if platform channels are broken
+      await service.isRunning();
+      return true;
+    } on MissingPluginException catch (e) {
+      _logger.log('[BackgroundService] Pre-flight check failed: $e');
+      _platformChannelBroken = true;
+      _initializationFailed = true;
+      return false;
+    } catch (e) {
+      _logger.log('[BackgroundService] Pre-flight check error: $e');
+      _platformChannelBroken = true;
+      _initializationFailed = true;
+      return false;
+    }
+  }
+
   static const String notificationChannelId = 'xpcardata_foreground';
   static const String notificationChannelName = 'XPCarData Background Service';
   static const int notificationId = 888;
@@ -84,6 +106,17 @@ class BackgroundServiceManager {
           return;
         }
 
+        // Pre-flight: test if the plugin's platform channel actually works
+        // before calling configure() which registers an isolate callback.
+        // If isRunning() throws, the plugin is non-functional on this device.
+        final channelWorks = await _preFlightCheck();
+        if (!channelWorks) {
+          _logger.log('[BackgroundService] Pre-flight check failed - plugin non-functional');
+          timeoutTimer?.cancel();
+          if (!completer.isCompleted) completer.complete();
+          return;
+        }
+
         // Create notification channel for Android
         const AndroidNotificationChannel channel = AndroidNotificationChannel(
           notificationChannelId,
@@ -104,7 +137,7 @@ class BackgroundServiceManager {
           _logger.log('[BackgroundService] Notification channel creation failed: $e');
         }
 
-        // Configure the service - this can fail on AI boxes
+        // Configure the service - can fail if plugin's native side isn't registered
         try {
           await service.configure(
             androidConfiguration: AndroidConfiguration(

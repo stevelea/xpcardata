@@ -37,7 +37,31 @@ void main() async {
     print('Firebase initialized: ${firebaseApp.name}, project: ${firebaseApp.options.projectId}');
 
     // Initialize Crashlytics for crash reporting
-    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+    // Use custom handler to filter recoverable errors (MissingPluginException
+    // from background_service on AI boxes) instead of recording them all as fatal
+    FlutterError.onError = (FlutterErrorDetails details) {
+      final exception = details.exception;
+      final exceptionStr = exception.toString();
+
+      // MissingPluginException from background_service is expected on some
+      // devices where the flutter_background_service plugin doesn't work
+      final isPluginError = exceptionStr.contains('MissingPluginException') ||
+          exceptionStr.contains('No implementation found');
+
+      if (isPluginError) {
+        // Record as non-fatal so it doesn't count as a crash
+        FirebaseCrashlytics.instance.recordError(
+          exception,
+          details.stack,
+          reason: 'Non-fatal Flutter plugin error (AI box compatibility)',
+          fatal: false,
+        );
+        DebugLogger.instance.log('[CRASH] Non-fatal plugin error: $exceptionStr');
+      } else {
+        // All other Flutter errors are fatal
+        FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+      }
+    };
 
     // Catch async errors not caught by Flutter framework
     PlatformDispatcher.instance.onError = (error, stack) {
@@ -52,7 +76,7 @@ void main() async {
           errorStr.contains('Broken pipe') ||
           errorStr.contains('Network is unreachable');
 
-      // Plugin errors on AI box - expected when native impl unavailable
+      // Plugin errors - expected on some devices where native impl unavailable
       final isPluginError = errorStr.contains('MissingPluginException') ||
           errorStr.contains('No implementation found');
 
