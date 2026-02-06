@@ -115,6 +115,15 @@ class DataSourceManager {
   /// Check if 12V battery protection is currently active (polling paused)
   bool get isAuxBatteryProtectionActive => _auxBatteryProtectionActive;
 
+  /// Validate and sanitize vehicle data, nullifying out-of-range values
+  VehicleData _sanitizeData(VehicleData data) {
+    if (data.stateOfCharge != null && data.stateOfCharge! > 100.0) {
+      _logger.log('[DataSourceManager] BAD DATA: SOC ${data.stateOfCharge}% > 100%, discarding value');
+      return data.copyWith(stateOfCharge: null);
+    }
+    return data;
+  }
+
   /// Stream of vehicle data from current active source
   Stream<VehicleData> get vehicleDataStream => _dataController.stream;
 
@@ -252,7 +261,7 @@ class DataSourceManager {
 
   /// Publish proxy-intercepted data
   void _publishProxyData(VehicleData data) {
-    final enrichedData = _enrichWithLocation(data);
+    final enrichedData = _sanitizeData(_enrichWithLocation(data));
     _dataController.add(enrichedData);
     _saveData(enrichedData);
     _publishToMqtt(enrichedData);
@@ -416,7 +425,7 @@ class DataSourceManager {
   Future<void> _startCarInfoSource() async {
     _dataSubscription = _carInfoService.vehicleDataStream.listen(
       (data) {
-        final enrichedData = _enrichWithLocation(data);
+        final enrichedData = _sanitizeData(_enrichWithLocation(data));
         _dataController.add(enrichedData);
         _saveData(enrichedData);
         _publishToMqtt(enrichedData);
@@ -437,7 +446,7 @@ class DataSourceManager {
   void _startObdSource() {
     _dataSubscription = _obdService.vehicleDataStream.listen(
       (data) {
-        final enrichedData = _enrichWithLocation(data);
+        final enrichedData = _sanitizeData(_enrichWithLocation(data));
         _dataController.add(enrichedData);
         _saveData(enrichedData);
         _publishToMqtt(enrichedData);

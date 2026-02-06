@@ -1000,8 +1000,12 @@ class OBDService {
               _logger.log('[OBDService] Speed: $value km/h');
               break;
             case OBDPIDType.stateOfCharge:
-              soc = value;
-              _logger.log('[OBDService] SOC: $value%');
+              if (value > 100.0) {
+                _logger.log('[OBDService] BAD DATA: SOC $value% exceeds 100%, discarding');
+              } else {
+                soc = value;
+                _logger.log('[OBDService] SOC: $value%');
+              }
               break;
             case OBDPIDType.batteryVoltage:
               batteryVoltage = value;
