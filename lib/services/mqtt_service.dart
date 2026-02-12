@@ -484,13 +484,12 @@ class MqttService {
         'state_class': 'measurement',
       },
       {
-        'name': 'SOC BMS',
-        'object_id': 'soc_bms',
-        'device_class': 'battery',
-        'unit_of_measurement': '%',
-        'value_template': '{{ value_json.SOC_BMS | default(0) | round(1) }}',
+        'name': 'BMS 111A',
+        'object_id': 'bms_111a',
+        'unit_of_measurement': '',
+        'value_template': '{{ value_json.BMS_111A | default(0) | round(1) }}',
         'json_attributes_template': lowPriorityAttrs,
-        'icon': 'mdi:battery-sync',
+        'icon': 'mdi:battery-unknown',
         'state_class': 'measurement',
       },
       {
