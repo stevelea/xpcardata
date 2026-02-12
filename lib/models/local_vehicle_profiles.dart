@@ -231,12 +231,12 @@ class LocalVehicleProfiles {
       OBDPIDConfig(
         name: 'CHG_LIMIT',
         pid: '221130',
-        description: 'Charge Limit Setting (%)',
+        description: 'Charge Limit Setting (%) - BMS reports +10 offset, corrected here',
         type: OBDPIDType.custom,
         header: '704',
         priority: PIDPriority.low, // Setting rarely changes - poll less often
-        formula: '[B4:B5]',
-        parser: (r) => OBDPIDConfig.parseWithFormula(r, '[B4:B5]'),
+        formula: '[B4:B5]-10',
+        parser: (r) => OBDPIDConfig.parseWithFormula(r, '[B4:B5]-10'),
       ),
 
       // ==================== VCU PIDs (Header 7E0) - Query after BMS ====================

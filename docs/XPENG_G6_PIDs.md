@@ -69,7 +69,7 @@ PIDs are categorized by polling priority to reduce OBD bus traffic:
 | 221124 | BMS_HV_V | BMS HV Battery Voltage | [B4:B5] | V | Low |
 | 22112C | BMS_112C | Unknown (30) | [B4:B5] | - | Low |
 | 22112D | BMS_CHG_STATUS | BMS Charge Status | B4 | 0/2/3 | High |
-| 221130 | CHG_LIMIT | Charge Limit Setting | [B4:B5] | % | Low |
+| 221130 | CHG_LIMIT | Charge Limit Setting | [B4:B5]-10 | % | Low |
 
 ### VCU PIDs (Header: 7E0)
 
