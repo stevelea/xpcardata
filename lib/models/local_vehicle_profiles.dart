@@ -189,12 +189,12 @@ class LocalVehicleProfiles {
         parser: (r) => OBDPIDConfig.parseWithFormula(r, '[B4:B5]'),
       ),
       OBDPIDConfig(
-        name: 'BMS_111A',
+        name: 'SOC_BMS',
         pid: '22111A',
-        description: 'BMS PID 111A (unknown - 1000, maybe 100.0%?)',
+        description: 'BMS raw SOC (%) - true cell SOC including buffer above usable capacity',
         type: OBDPIDType.custom,
         header: '704',
-        priority: PIDPriority.low, // Unknown/diagnostic - poll less often
+        priority: PIDPriority.low, // Compare against display SOC (221109) to understand buffer
         formula: '[B4:B5]/10',
         parser: (r) => OBDPIDConfig.parseWithFormula(r, '[B4:B5]/10'),
       ),
