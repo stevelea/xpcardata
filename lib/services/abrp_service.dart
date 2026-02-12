@@ -115,23 +115,17 @@ class AbrpService {
         tlm['odometer'] = double.parse(data.odometer!.toStringAsFixed(1));
       }
 
-      // Charging status
-      // Note: The isCharging parameter should already be filtered by speed in the caller
-      // (data_source_manager.dart), but we add a safety check here as well to ensure
-      // we don't report charging while driving (e.g., during regenerative braking)
+      // Charging status - trust the caller's determination from data_source_manager
+      // which uses HV_A (batteryCurrent) as the sole reliable indicator.
+      // DO NOT use CHARGING PID (22031D) from additionalProperties - it's stale.
       if (isCharging != null) {
-        // Trust the caller's determination (should already account for speed)
         tlm['is_charging'] = isCharging ? 1 : 0;
       } else {
-        // Fallback: only report charging if vehicle is stationary
+        // Fallback: use current/power only (not stale CHARGING PID)
         final isStationary = data.speed == null || data.speed! < 1.0;
-        if (isStationary && data.additionalProperties != null) {
-          final charging = data.additionalProperties!['CHARGING'];
-          if (charging != null) {
-            tlm['is_charging'] = (charging == 1 || charging == 1.0) ? 1 : 0;
-          }
-        } else if (!isStationary) {
-          // Vehicle is moving - explicitly not charging
+        if (isStationary && data.batteryCurrent != null && data.batteryCurrent! < -0.5) {
+          tlm['is_charging'] = 1;
+        } else {
           tlm['is_charging'] = 0;
         }
       }

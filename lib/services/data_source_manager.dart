@@ -564,15 +564,14 @@ class DataSourceManager {
 
       if (isStationary) {
         // Only consider charging if vehicle is stationary
+        // Use HV_A (batteryCurrent) as the sole indicator - it's the only reliable one.
+        // DO NOT fall back to CHARGING PID (22031D) - it's stale after charging stops.
         if (data.batteryCurrent != null && data.batteryCurrent! < -0.5) {
-          // Negative current while stationary = actual charging
           isCharging = true;
-        } else if (data.additionalProperties != null) {
-          // Fall back to CHARGING PID only when stationary
-          final charging = data.additionalProperties!['CHARGING'];
-          if (charging != null) {
-            isCharging = (charging == 1 || charging == 1.0);
-          }
+        } else if (data.power != null && data.power! < -0.5) {
+          isCharging = true;
+        } else {
+          isCharging = false;
         }
       } else {
         // Vehicle is moving - not charging (could be regen braking)
