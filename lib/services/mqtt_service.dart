@@ -484,6 +484,15 @@ class MqttService {
         'state_class': 'measurement',
       },
       {
+        'name': 'Charge Limit',
+        'object_id': 'charge_limit',
+        'unit_of_measurement': '%',
+        'value_template': '{{ value_json.CHG_LIMIT | default(0) | round(0) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:battery-lock',
+        'state_class': 'measurement',
+      },
+      {
         'name': 'BMS 111A',
         'object_id': 'bms_111a',
         'unit_of_measurement': '',

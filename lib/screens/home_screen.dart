@@ -664,6 +664,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
       // Guestimated Range moved from primary display (swapped with Speed)
       _MetricData('Guestimated Range', estimatedRange?.toStringAsFixed(0) ?? '--', 'km', Icons.route, Colors.green),
       _MetricData('State of Health', data.stateOfHealth?.toStringAsFixed(1) ?? '--', '%', Icons.health_and_safety, Colors.teal),
+      _MetricData('Charge Limit', (data.additionalProperties?['CHG_LIMIT'] as num?)?.toStringAsFixed(0) ?? '--', '%', Icons.battery_charging_full, Colors.amber),
       _MetricData('Battery Temp', data.batteryTemperature?.toStringAsFixed(1) ?? '--', '°C', Icons.thermostat, Colors.orange),
       _MetricData('12V Battery', auxVoltageStr, 'V', Icons.battery_full, auxVoltageColor),
       _MetricData('Cell ΔV', cellVoltageDelta, 'mV', Icons.battery_std, Colors.cyan),
