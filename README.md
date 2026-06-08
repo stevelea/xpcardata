@@ -4,7 +4,7 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![Flutter](https://img.shields.io/badge/Flutter-3.x-blue)
-![Version](https://img.shields.io/badge/version-1.4.2-orange)
+![Version](https://img.shields.io/badge/version-1.4.20-orange)
 
 ## Screenshots
 
@@ -43,7 +43,10 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 
 ### Additional Features
 - **Live Data Screen** - Detailed view of all PIDs, cell voltages & temperatures
-- **Backup & Restore** - Export/import settings and charging history
+- **Backup & Restore** - Export/import settings, charging history, AND custom/community PIDs
+- **Custom battery capacity** - "Other / Custom" vehicle option lets non-XPENG users supply pack kWh
+- **Raw bytes over MQTT** - Each PID's cleaned hex bytes published as `value_json.rawBytes.<PID>` so HA template sensors can extract individual bytes from multi-signal PIDs
+- **Legacy PID profile back-out** - Toggle to revert to v3 XPENG G6 PIDs if v4 corrections misbehave on a specific car
 - Background service for continuous monitoring
 - Charging session detection and history
 - **OpenChargeMap integration** - Auto-lookup charger names from GPS coordinates
@@ -59,10 +62,10 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 ### Download
 Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcardata/releases).
 
-**Current Version:** v1.4.2
+**Current Version:** v1.4.20
 
-1. Download `XPCarData-v1.4.2.zip` from the [latest release](https://github.com/stevelea/xpcardata/releases/latest)
-2. Extract the ZIP file to get `XPCarData-v1.4.2.apk`
+1. Download `XPCarData-v1.4.20.zip` from the [latest release](https://github.com/stevelea/xpcardata/releases/latest)
+2. Extract the ZIP file to get `XPCarData-v1.4.20.apk`
 3. Install the APK on your Android device (enable "Install from unknown sources" if prompted)
 
 ### Requirements
@@ -155,7 +158,41 @@ Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcard
 
 ## Version History
 
-### v1.4.2 (Current)
+### v1.4.20 (Current)
+- **Hide broken Charge Limit reading** - PID 221130 produced wrong values (1710%, 2100%); hidden from home screen and HA discovery until a confirmed formula is available. Raw bytes still flow via `value_json.rawBytes.CHG_LIMIT` for diagnosis.
+
+### v1.4.19
+- **16 new HA sensors** for v4 G6 PIDs: 12V Battery, VCU SoC, Accelerator Pedal, Brake Pressure, Front/Rear Motor RPM, Front/Rear Motor Torque Request, Motor Coolant Temp, Battery Coolant Temp, Fast/Slow Charge Temps, DC Charge V/A.
+
+### v1.4.18
+- **XPENG G6 PID profile overhaul (v4)** - Corrected against community WiCAN definitions. Odometer (220101) moved from VCU to BMS with 3-byte `[B4:B6]` formula (fixes 2026 G6 reading 25089 km instead of 1146). 12V voltage moved to BMS. Several PIDs renamed/reformulated where v3 had wrong labels (`AC_CHG_A` was brake pressure, `INV_T` was slow charge temp 2, `HV_PWR` was rear motor torque request, `22031E` was VCU SoC not DC charge status, etc.). New charging temp PIDs added. Motor RPM applies G6-specific -16000 offset. Settings → Vehicle → "Use legacy v3 PIDs" reverts if v4 misbehaves.
+
+### v1.4.17
+- **Custom battery capacity (#7)** - Vehicle picker now has "Other / Custom" entry for non-XPENG community-profile users.
+- **Custom PIDs included in backup (#8)** - Backup/restore now carries `obd_pids` so community profiles survive across installs. On AI boxes the restore also writes directly to `obd_pids.json` file fallback. Backup format v2 (v1 still imports).
+- **Raw bytes per PID over MQTT (#9)** - Each polled PID's cleaned hex string published as `value_json.rawBytes.<PID_NAME>`. HA template sensors can extract individual bytes from multi-signal PIDs (e.g. Hyundai/Kia 220101) without re-implementing ELM327 parsing in Jinja.
+
+### v1.4.16
+- **OBD parser multi-frame fix (#5)** - Multi-frame ISO-TP responses (Kia/Hyundai 220101 and other long PIDs) now parse correctly. The per-frame `0:`/`1:`/`2:` ELM327 sequence prefixes and the 3-char length header are now stripped, fixing the half-byte misalignment that corrupted every byte after the first colon.
+- **`last_collected` no longer advances when the car isn't responding (#4)** - When the OBD adapter is connected but every PID returns NaN/empty (car asleep, gateway timeout), the app no longer publishes a `VehicleData` stamped with `DateTime.now()`. HA's `last_collected` now reflects the time of the last actual successful poll.
+
+### v1.4.15
+- **Charge Limit** added to dashboard and Home Assistant (later disabled in v1.4.20 — formula was wrong).
+
+### v1.4.14
+- Fix CHG_LIMIT formula - subtract 10 to match display value.
+
+### v1.4.10–1.4.13
+- Discard bad SOC data when battery % exceeds 100.
+- Expose SOC_BMS (PID 22111A) for BMS vs display SOC comparison.
+- Fix false `is_charging=1` sent to ABRP from stale CHARGING PID.
+- Rename SOC_BMS back to BMS_111A (not a SOC reading after all).
+
+### v1.4.8–1.4.9
+- Add `data_source` attribute to all sensors.
+- Fix AI box crash; fix MissingPluginException crash from background_service.
+
+### v1.4.2
 - **Per-sensor MQTT timestamps** - Each sensor includes `priority` and `last_collected` attributes
 - **New sensors** - Cell Voltage Avg, Cell Temp Avg with dedicated timestamps
 - **Dashboard cleanup** - Removed redundant Additional Data section
@@ -205,6 +242,6 @@ For issues and feature requests: https://github.com/stevelea/xpcardata
 
 ---
 
-**Tested on:** XPENG G6 (2023-2025 models)
+**Tested on:** XPENG G6 (2023-2026 models). Community Kia/Hyundai profiles supported via custom battery capacity + raw bytes over MQTT.
 
 **Privacy:** Fleet Statistics is opt-in only. No personal data, GPS coordinates, or vehicle IDs are collected.

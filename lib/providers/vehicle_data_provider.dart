@@ -30,6 +30,21 @@ const Map<String, double> vehicleBatteryCapacities = {
   '25SR': 68.5,
 };
 
+/// Sentinel vehicle_model value indicating the user-supplied
+/// custom_battery_capacity_kwh setting should be used instead of the table above
+/// (issue #7 — non-XPENG vehicles via community profiles).
+const String customVehicleModelKey = 'CUSTOM';
+
+/// Resolve the active battery capacity in kWh given the stored vehicle model
+/// and an optional custom override. Used by every service that needs to know
+/// pack size (MQTT publishing, charging session energy math, range display).
+double resolveBatteryCapacity(String? vehicleModel, double? customKwh) {
+  if (vehicleModel == customVehicleModelKey && customKwh != null && customKwh > 0) {
+    return customKwh;
+  }
+  return vehicleBatteryCapacities[vehicleModel] ?? 87.5;
+}
+
 /// Vehicle model provider - loads from SharedPreferences
 final vehicleModelProvider = FutureProvider<String>((ref) async {
   try {
@@ -40,10 +55,22 @@ final vehicleModelProvider = FutureProvider<String>((ref) async {
   }
 });
 
+/// User-supplied battery capacity in kWh, used when vehicle_model = CUSTOM.
+final customBatteryCapacityProvider = FutureProvider<double?>((ref) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getDouble('custom_battery_capacity_kwh');
+    return (v != null && v > 0) ? v : null;
+  } catch (e) {
+    return null;
+  }
+});
+
 /// Battery capacity provider based on vehicle model
 final batteryCapacityProvider = FutureProvider<double>((ref) async {
   final model = await ref.watch(vehicleModelProvider.future);
-  return vehicleBatteryCapacities[model] ?? 87.5;
+  final custom = await ref.watch(customBatteryCapacityProvider.future);
+  return resolveBatteryCapacity(model, custom);
 });
 
 // ==================== Service Providers ====================

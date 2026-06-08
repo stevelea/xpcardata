@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vehicle_data.dart';
 import '../models/alert.dart';
 import '../models/charging_session.dart';
-import '../providers/vehicle_data_provider.dart' show vehicleBatteryCapacities;
+import '../providers/vehicle_data_provider.dart' show resolveBatteryCapacity;
 import 'data_usage_service.dart';
 import 'hive_storage_service.dart';
 
@@ -207,28 +207,42 @@ class MqttService {
     }
   }
 
-  /// Get battery capacity from user settings (cached)
+  /// Get battery capacity from user settings (cached).
+  /// Honours the `CUSTOM` vehicle model + `custom_battery_capacity_kwh` setting
+  /// so users running non-XPENG community profiles can supply their pack size
+  /// (issue #7).
   double? _cachedBatteryCapacity;
+
+  /// Invalidate the cached battery capacity so the next publish re-reads
+  /// from settings. Call after the user changes vehicle_model or
+  /// custom_battery_capacity_kwh.
+  void invalidateBatteryCapacityCache() {
+    _cachedBatteryCapacity = null;
+  }
+
   Future<double> _getBatteryCapacityFromSettings() async {
     if (_cachedBatteryCapacity != null) return _cachedBatteryCapacity!;
 
     String vehicleModel = '24LR'; // Default
+    double? customKwh;
 
     // Try Hive first (most reliable on AAOS)
     final hive = HiveStorageService.instance;
     if (hive.isAvailable) {
       vehicleModel = hive.getSetting<String>('vehicle_model') ?? vehicleModel;
+      customKwh = hive.getSetting<double>('custom_battery_capacity_kwh');
     } else {
       // Fall back to SharedPreferences
       try {
         final prefs = await SharedPreferences.getInstance();
         vehicleModel = prefs.getString('vehicle_model') ?? vehicleModel;
+        customKwh = prefs.getDouble('custom_battery_capacity_kwh');
       } catch (e) {
         // Use default
       }
     }
 
-    _cachedBatteryCapacity = vehicleBatteryCapacities[vehicleModel] ?? 87.5;
+    _cachedBatteryCapacity = resolveBatteryCapacity(vehicleModel, customKwh);
     return _cachedBatteryCapacity!;
   }
 
@@ -443,6 +457,18 @@ class MqttService {
     final stateTopic = 'vehicles/$_vehicleId/data';
     final availabilityTopic = 'vehicles/$_vehicleId/status';
 
+    // Clear discovery configs for sensors that were published by previous app
+    // versions but have been removed. HA discovery is retained on the broker so
+    // a removed sensor sticks around forever otherwise. Publish an empty
+    // retained payload to the discovery topic to make HA delete the entity.
+    const deprecatedSensorObjectIds = <String>[
+      'charge_limit', // v1.4.20: PID 221130 formula was wrong, hidden until fixed
+    ];
+    for (final objectId in deprecatedSensorObjectIds) {
+      final topic = '$_discoveryPrefix/sensor/$nodeId/$objectId/config';
+      _publishMessage(topic, '', MqttQos.atLeastOnce, retain: true);
+    }
+
     // Device configuration shared by all entities
     final device = {
       'identifiers': [nodeId],
@@ -483,15 +509,19 @@ class MqttService {
         'icon': 'mdi:battery-heart-variant',
         'state_class': 'measurement',
       },
-      {
-        'name': 'Charge Limit',
-        'object_id': 'charge_limit',
-        'unit_of_measurement': '%',
-        'value_template': '{{ value_json.CHG_LIMIT | default(0) | round(0) }}',
-        'json_attributes_template': lowPriorityAttrs,
-        'icon': 'mdi:battery-lock',
-        'state_class': 'measurement',
-      },
+      // Charge Limit HA sensor hidden in v1.4.20 — PID 221130 / formula
+      // [B4:B5]-10 produces obviously wrong readings (1710%, 2100%) on the G6.
+      // PID still polled so the raw bytes flow through value_json.rawBytes.CHG_LIMIT
+      // for diagnosis; re-add this entry once we have a confirmed formula.
+      // {
+      //   'name': 'Charge Limit',
+      //   'object_id': 'charge_limit',
+      //   'unit_of_measurement': '%',
+      //   'value_template': '{{ value_json.CHG_LIMIT | default(0) | round(0) }}',
+      //   'json_attributes_template': lowPriorityAttrs,
+      //   'icon': 'mdi:battery-lock',
+      //   'state_class': 'measurement',
+      // },
       {
         'name': 'BMS 111A',
         'object_id': 'bms_111a',
@@ -668,6 +698,175 @@ class MqttService {
         'device_class': 'timestamp',
         'value_template': '{{ value_json.timestamp | default("") }}',
         'icon': 'mdi:clock-check-outline',
+      },
+
+      // ==================== v4 XPENG G6 custom PIDs (added in v1.4.19) ====================
+      // These all live in value_json.<PID_NAME> via the OBD service's additionalData map.
+      // Most are low-priority (polled every ~5 min) — cached value is published in between.
+      {
+        'name': '12V Battery',
+        'object_id': 'aux_voltage',
+        'device_class': 'voltage',
+        'unit_of_measurement': 'V',
+        'value_template': '{{ value_json.AUX_V | default(0) | round(2) }}',
+        'json_attributes_template': highPriorityAttrs,
+        'icon': 'mdi:car-battery',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'VCU SoC',
+        'object_id': 'vcu_soc',
+        'device_class': 'battery',
+        'unit_of_measurement': '%',
+        'value_template': '{{ value_json.VCU_SOC | default(0) | round(1) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:battery-outline',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Accelerator Pedal',
+        'object_id': 'accel_pedal',
+        'unit_of_measurement': '%',
+        'value_template': '{{ value_json.ACCEL_PEDAL | default(0) | round(1) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:speedometer',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Brake Pressure',
+        'object_id': 'brake_pressure',
+        'device_class': 'pressure',
+        'unit_of_measurement': 'bar',
+        'value_template': '{{ value_json.BRAKE_PRESSURE | default(0) | round(1) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:car-brake-alert',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Front Motor RPM',
+        'object_id': 'front_motor_rpm',
+        'unit_of_measurement': 'rpm',
+        'value_template': '{{ value_json.FRONT_MOTOR_RPM | default(0) | round(0) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:engine',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Rear Motor RPM',
+        'object_id': 'rear_motor_rpm',
+        'unit_of_measurement': 'rpm',
+        'value_template': '{{ value_json.REAR_MOTOR_RPM | default(0) | round(0) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:engine',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Front Motor Torque Request',
+        'object_id': 'front_motor_torque',
+        'unit_of_measurement': 'Nm',
+        'value_template': '{{ value_json.FRONT_MOTOR_TORQUE_REQ | default(0) | round(1) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:engine-outline',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Rear Motor Torque Request',
+        'object_id': 'rear_motor_torque',
+        'unit_of_measurement': 'Nm',
+        'value_template': '{{ value_json.REAR_MOTOR_TORQUE_REQ | default(0) | round(1) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:engine-outline',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Motor Coolant Temp',
+        'object_id': 'motor_coolant_temp',
+        'device_class': 'temperature',
+        'unit_of_measurement': '°C',
+        'value_template': '{{ value_json.MOTOR_T | default(0) | round(1) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:thermometer',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Battery Coolant Temp',
+        'object_id': 'battery_coolant_temp',
+        'device_class': 'temperature',
+        'unit_of_measurement': '°C',
+        'value_template': '{{ value_json.COOLANT_T | default(0) | round(1) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:thermometer-lines',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Fast Charge Temp 1',
+        'object_id': 'fast_chg_temp_1',
+        'device_class': 'temperature',
+        'unit_of_measurement': '°C',
+        'value_template': '{{ value_json.FAST_CHG_T1 | default(0) | round(1) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:thermometer-high',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Fast Charge Temp 2',
+        'object_id': 'fast_chg_temp_2',
+        'device_class': 'temperature',
+        'unit_of_measurement': '°C',
+        'value_template': '{{ value_json.FAST_CHG_T2 | default(0) | round(1) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:thermometer-high',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Slow Charge Temp 1',
+        'object_id': 'slow_chg_temp_1',
+        'device_class': 'temperature',
+        'unit_of_measurement': '°C',
+        'value_template': '{{ value_json.SLOW_CHG_T1 | default(0) | round(1) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:thermometer-low',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Slow Charge Temp 2',
+        'object_id': 'slow_chg_temp_2',
+        'device_class': 'temperature',
+        'unit_of_measurement': '°C',
+        'value_template': '{{ value_json.SLOW_CHG_T2 | default(0) | round(1) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:thermometer-low',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'Slow Charge Temp 3',
+        'object_id': 'slow_chg_temp_3',
+        'device_class': 'temperature',
+        'unit_of_measurement': '°C',
+        'value_template': '{{ value_json.SLOW_CHG_T3 | default(0) | round(1) }}',
+        'json_attributes_template': lowPriorityAttrs,
+        'icon': 'mdi:thermometer-low',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'DC Charge Voltage',
+        'object_id': 'dc_chg_voltage',
+        'device_class': 'voltage',
+        'unit_of_measurement': 'V',
+        'value_template': '{{ value_json.DC_CHG_V | default(0) | round(1) }}',
+        'json_attributes_template': highPriorityAttrs,
+        'icon': 'mdi:ev-plug-ccs2',
+        'state_class': 'measurement',
+      },
+      {
+        'name': 'DC Charge Current',
+        'object_id': 'dc_chg_current',
+        'device_class': 'current',
+        'unit_of_measurement': 'A',
+        'value_template': '{{ value_json.DC_CHG_A | default(0) | round(1) }}',
+        'json_attributes_template': highPriorityAttrs,
+        'icon': 'mdi:ev-plug-ccs2',
+        'state_class': 'measurement',
       },
     ];
 

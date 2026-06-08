@@ -10,7 +10,7 @@ import 'debug_logger.dart';
 import 'native_bluetooth_service.dart';
 
 /// Current PID profile version - increment when formulas change
-const int _pidProfileVersion = 3; // v3: Added priority-based polling
+const int _pidProfileVersion = 4; // v4: WiCAN-corrected XPENG G6 profile (odometer to BMS, AC_CHG/HV_PWR/INV_T/RANGE_EST/DC_CHG_STATUS renamed and reformulated, new charging-temp PIDs, G6 motor RPM offset)
 
 /// Service for accessing vehicle data via OBD-II Bluetooth adapter
 /// Works with ELM327-compatible adapters
@@ -363,11 +363,25 @@ class OBDService {
 
   /// Migrate to latest PID profile (refresh XPENG G6 profile)
   Future<void> _migrateToLatestProfile() async {
-    // Find XPENG G6 local profile
+    // Honor the legacy v3 back-out toggle before resolving the profile so
+    // users can fall back to the pre-WiCAN-corrections profile if v4 misbehaves
+    // on their specific car. Stored in SharedPreferences/Hive as a bool.
+    try {
+      final prefs = await SharedPreferences.getInstance().timeout(
+        const Duration(seconds: 1),
+        onTimeout: () => throw TimeoutException('SharedPreferences timeout'),
+      );
+      LocalVehicleProfiles.useLegacyV3XpengProfile =
+          prefs.getBool('use_legacy_pid_profile_v3') ?? false;
+    } catch (e) {
+      _logger.log('[OBDService] Could not read legacy profile flag: $e');
+    }
+
     final xpengProfile = LocalVehicleProfiles.findProfile('XPENG G6');
     if (xpengProfile != null) {
       _customPIDs = xpengProfile.pids;
-      _logger.log('[OBDService] Migrated to XPENG G6 profile v$_pidProfileVersion with ${_customPIDs.length} PIDs');
+      final flavor = LocalVehicleProfiles.useLegacyV3XpengProfile ? 'v3 legacy' : 'v$_pidProfileVersion';
+      _logger.log('[OBDService] Migrated to XPENG G6 profile ($flavor) with ${_customPIDs.length} PIDs');
 
       // Save the updated PIDs
       await _saveCustomPIDs(_customPIDs);
@@ -377,6 +391,14 @@ class OBDService {
     } else {
       _logger.log('[OBDService] WARNING: Could not find XPENG G6 profile for migration');
     }
+  }
+
+  /// Force a re-migration to the currently-selected profile flavor. Used by
+  /// the legacy-profile back-out toggle so changing it takes effect without
+  /// requiring an app restart.
+  Future<void> reloadPidProfile() async {
+    _logger.log('[OBDService] Reloading PID profile (legacy flag changed)');
+    await _migrateToLatestProfile();
   }
 
   /// Save custom PIDs to storage
@@ -880,7 +902,11 @@ class OBDService {
         try {
           final data = await _getCurrentVehicleData();
           // Re-check connection state after async operation
-          if (_isConnected && !_dataController.isClosed) {
+          // Skip null data (no PIDs succeeded this cycle) so downstream consumers
+          // don't see fresh timestamps when no real data was collected. Without
+          // this, HA's last_collected attribute keeps refreshing on every poll
+          // even when the car is unresponsive (issue #4).
+          if (data != null && _isConnected && !_dataController.isClosed) {
             _dataController.add(data);
           }
         } catch (e) {
@@ -896,8 +922,10 @@ class OBDService {
     });
   }
 
-  /// Get current vehicle data from OBD-II using custom PIDs
-  Future<VehicleData> _getCurrentVehicleData() async {
+  /// Get current vehicle data from OBD-II using custom PIDs.
+  /// Returns null when no PIDs succeeded this cycle so the caller can skip
+  /// emitting data with a fresh timestamp that doesn't reflect real collection.
+  Future<VehicleData?> _getCurrentVehicleData() async {
     try {
       double? speed;
       double? soc;
@@ -910,10 +938,15 @@ class OBDService {
       double? cumulativeCharge;
       double? cumulativeDischarge;
       final Map<String, dynamic> additionalData = {};
+      // Raw hex byte string per PID name (issue #9). Lets HA template sensors
+      // pull individual bytes out for multi-signal PIDs without re-implementing
+      // ELM327 multi-frame parsing in Jinja.
+      final Map<String, String> rawBytesByPid = {};
+      bool gotAnyData = false; // True if at least one PID was successfully polled
 
       if (_customPIDs.isEmpty) {
-        // No PIDs configured, return empty data
-        return VehicleData(timestamp: DateTime.now());
+        // No PIDs configured - nothing to publish
+        return null;
       }
 
       // Increment poll cycle counter
@@ -986,6 +1019,15 @@ class OBDService {
             _logger.log('[OBDService] ${pidConfig.name}: skipped (error response)');
             _consecutive7FErrorCount++;
             continue;
+          }
+
+          gotAnyData = true;
+
+          // Capture cleaned hex bytes for this PID so MQTT can publish them.
+          // Skipped if the response was just an error response (returns '').
+          final hex = OBDPIDConfig.extractCleanedHex(response);
+          if (hex.isNotEmpty) {
+            rawBytesByPid[pidConfig.name] = hex;
           }
 
           // Cache low priority values for use in cycles when they're not polled
@@ -1112,6 +1154,15 @@ class OBDService {
         _currentEcuHeader = null;
       }
 
+      // If no PID returned a real value this cycle (e.g. adapter is connected
+      // but the car is unresponsive / asleep), don't emit data with a fresh
+      // timestamp. HA's last_collected attribute would otherwise keep advancing
+      // even though we never actually read anything from the vehicle (issue #4).
+      if (!gotAnyData) {
+        _logger.log('[OBDService] Poll cycle $_pollCycleCount: no PIDs returned data, skipping emit');
+        return null;
+      }
+
       // Add per-category timestamps for when data was actually polled
       if (_cellVoltagesLastUpdated != null) {
         additionalData['cellVoltagesLastUpdated'] = _cellVoltagesLastUpdated!.toIso8601String();
@@ -1121,6 +1172,14 @@ class OBDService {
       }
       if (_lowPriorityLastUpdated != null) {
         additionalData['lowPriorityLastUpdated'] = _lowPriorityLastUpdated!.toIso8601String();
+      }
+
+      // Publish raw hex bytes per PID under a single nested key (issue #9).
+      // Users with multi-signal PIDs (e.g. Hyundai/Kia 220101 carrying ~20
+      // values in one response) can split this in HA Jinja:
+      //   {{ value_json.rawBytes.SOC[20:22] | int(base=16) }}
+      if (rawBytesByPid.isNotEmpty) {
+        additionalData['rawBytes'] = rawBytesByPid;
       }
 
       return VehicleData(
@@ -1139,7 +1198,8 @@ class OBDService {
       );
     } catch (e) {
       _logger.log('[OBDService] Error getting vehicle data: $e');
-      return VehicleData(timestamp: DateTime.now());
+      // Don't emit a synthetic timestamp on failure (issue #4)
+      return null;
     }
   }
 

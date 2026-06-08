@@ -73,6 +73,52 @@ class OBDPIDConfig {
     );
   }
 
+  /// Return the cleaned hex byte string for an OBD response: whitespace and
+  /// prompt char stripped, multi-frame ISO-TP sequence prefixes and length
+  /// header removed, 3-nibble CAN header (e.g. "784", "7E8") stripped, so
+  /// every two chars are one data byte indexable as B0, B1, B2... — the same
+  /// indexing the formula evaluator uses.
+  ///
+  /// Empty string means the response was an error/negative response and no
+  /// useful bytes are available. Used by MQTT to publish a per-PID raw_bytes
+  /// entity so HA template sensors can pull individual bytes out for
+  /// multi-signal PIDs (issue #9).
+  static String extractCleanedHex(String response) {
+    String parts = response.replaceAll(' ', '').replaceAll('>', '').trim().toUpperCase();
+
+    // Error responses → nothing useful to publish
+    if (parts.contains('ERROR') ||
+        parts.contains('STOPPED') ||
+        parts.contains('SEARCHING') ||
+        parts.contains('UNABLE') ||
+        parts.contains('NO DATA') ||
+        parts.contains('?') ||
+        parts.length < 6) {
+      return '';
+    }
+
+    // Same multi-frame handling as parseWithFormula
+    final isMultiFrame = RegExp(r'[0-9A-F]:').hasMatch(parts);
+    if (isMultiFrame) {
+      parts = parts.replaceAll(RegExp(r'[0-9A-F]:'), '');
+      if (parts.length >= 3) {
+        parts = parts.substring(3);
+      }
+    }
+
+    // Strip the 3-nibble CAN ID header so byte offsets line up with B0, B1...
+    if (parts.length >= 3 && RegExp(r'^7[0-9A-F]{2}$').hasMatch(parts.substring(0, 3))) {
+      parts = parts.substring(3);
+    }
+
+    // Truncate trailing nibble to keep complete bytes
+    if (parts.length % 2 != 0) {
+      parts = parts.substring(0, parts.length - 1);
+    }
+
+    return parts;
+  }
+
   /// Parse OBD response using formula notation
   /// Supports two formats:
   /// 1. WiCAN notation: B3 = byte 3, [B3:B4] = bytes 3-4 as 16-bit value
@@ -82,6 +128,21 @@ class OBDPIDConfig {
     try {
       // Remove spaces, prompt character, and trim
       String parts = response.replaceAll(' ', '').replaceAll('>', '').trim().toUpperCase();
+
+      // Handle ELM327 multi-frame ISO-TP responses (used by Kia/Hyundai PID 220101 etc).
+      // Format with ATCAF1: "LLL N1:DATA1 N2:DATA2..." where LLL is the 3-hex-char total
+      // data length and Nx: are per-frame sequence prefixes. After whitespace is stripped
+      // this looks like "03E0:6201...1:ED7E...2:000B...". We strip the sequence prefixes
+      // and the leading length header so the byte-pairing loop below stays aligned.
+      final isMultiFrame = RegExp(r'[0-9A-F]:').hasMatch(parts);
+      if (isMultiFrame) {
+        parts = parts.replaceAll(RegExp(r'[0-9A-F]:'), '');
+        // Strip the 3-char length header (e.g. "03E" = 62 data bytes). Without this the
+        // remaining string is odd-length and every subsequent byte pair shifts by one nibble.
+        if (parts.length >= 3) {
+          parts = parts.substring(3);
+        }
+      }
 
       // Check for error messages from OBD adapter
       if (parts.contains('ERROR') ||

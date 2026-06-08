@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vehicle_data.dart';
 import '../models/charging_session.dart';
 import '../models/charging_sample.dart';
-import '../providers/vehicle_data_provider.dart' show vehicleBatteryCapacities;
+import '../providers/vehicle_data_provider.dart' show resolveBatteryCapacity;
 import 'debug_logger.dart';
 import 'mqtt_service.dart';
 import 'database_service.dart';
@@ -299,24 +299,27 @@ class ChargingSessionService {
     if (_batteryCapacityKwh != null) return _batteryCapacityKwh!;
 
     String vehicleModel = '24LR';
+    double? customKwh;
 
     // Try Hive first (most reliable on AI boxes)
     final hive = HiveStorageService.instance;
     if (hive.isAvailable) {
       vehicleModel = hive.getSetting<String>('vehicle_model') ?? vehicleModel;
+      customKwh = hive.getSetting<double>('custom_battery_capacity_kwh');
       _logger.log('[Charging] Loaded vehicle_model from Hive: $vehicleModel');
     } else {
       // Fallback to SharedPreferences
       try {
         final prefs = await SharedPreferences.getInstance();
         vehicleModel = prefs.getString('vehicle_model') ?? vehicleModel;
+        customKwh = prefs.getDouble('custom_battery_capacity_kwh');
         _logger.log('[Charging] Loaded vehicle_model from SharedPreferences: $vehicleModel');
       } catch (e) {
         _logger.log('[Charging] Failed to load vehicle_model: $e');
       }
     }
 
-    _batteryCapacityKwh = vehicleBatteryCapacities[vehicleModel] ?? 87.5;
+    _batteryCapacityKwh = resolveBatteryCapacity(vehicleModel, customKwh);
     _logger.log('[Charging] Battery capacity for $vehicleModel: $_batteryCapacityKwh kWh');
     return _batteryCapacityKwh!;
   }

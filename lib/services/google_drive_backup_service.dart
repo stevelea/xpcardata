@@ -16,7 +16,9 @@ class BackupService {
   BackupService._();
 
   static const String _backupFileName = 'xpcardata_backup.json';
-  static const int _backupVersion = 1;
+  // v2: includes obd_pids (custom/community-profile PIDs) and
+  //     custom_battery_capacity_kwh (issues #7 and #8). v1 backups still load.
+  static const int _backupVersion = 2;
 
   String? _error;
   DateTime? _lastBackupTime;
@@ -399,9 +401,16 @@ class BackupService {
 
       // Vehicle & Location
       settings['vehicle_model'] = prefs.getString('vehicle_model');
+      settings['custom_battery_capacity_kwh'] = prefs.getDouble('custom_battery_capacity_kwh');
       settings['tailscale_auto_connect'] = prefs.getBool('tailscale_auto_connect');
       settings['location_enabled'] = prefs.getBool('location_enabled');
       settings['left_hand_drive'] = prefs.getBool('left_hand_drive');
+
+      // Custom / community-profile PIDs (stored as a JSON string in SharedPreferences).
+      // Including this lets users carry their imported community profiles across
+      // installs and devices (issue #8).
+      settings['obd_pids'] = prefs.getString('obd_pids');
+      settings['pid_profile_version'] = prefs.getInt('pid_profile_version');
 
       // Home Location
       settings['home_latitude'] = prefs.getDouble('home_latitude');
@@ -594,6 +603,27 @@ class BackupService {
       debugPrint('[Backup] Settings saved to file: $filePath');
     } catch (e) {
       debugPrint('[Backup] Failed to save settings to file: $e');
+    }
+
+    // On AI boxes where SharedPreferences is unreliable, the OBD service reads
+    // custom PIDs from a dedicated obd_pids.json. Restore must touch that path
+    // too so a fresh install on an AI box actually picks up the imported PIDs
+    // without needing a working SharedPreferences (issue #8).
+    final obdPidsJson = settings['obd_pids'];
+    if (obdPidsJson is String && obdPidsJson.isNotEmpty) {
+      try {
+        String? filePath;
+        try {
+          final directory = await getApplicationDocumentsDirectory();
+          filePath = '${directory.path}/obd_pids.json';
+        } catch (e) {
+          filePath = '/data/data/com.example.carsoc/files/obd_pids.json';
+        }
+        await File(filePath).writeAsString(obdPidsJson);
+        debugPrint('[Backup] Custom PIDs restored to file: $filePath');
+      } catch (e) {
+        debugPrint('[Backup] Failed to restore obd_pids.json: $e');
+      }
     }
   }
 

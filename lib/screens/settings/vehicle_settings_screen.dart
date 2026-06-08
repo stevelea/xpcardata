@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/vehicle_data_provider.dart';
+import '../../providers/mqtt_provider.dart';
 import '../../services/open_charge_map_service.dart';
 import '../../services/hive_storage_service.dart';
 
@@ -16,28 +17,13 @@ class VehicleSettingsScreen extends ConsumerStatefulWidget {
 
 class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
   String _vehicleModel = '24LR';
+  double? _customBatteryKwh; // Only used when _vehicleModel == customVehicleModelKey
+  bool _useLegacyV3Pids = false; // Back-out switch for the WiCAN-corrected v4 XPENG profile
   bool? _locationEnabled; // null = not yet loaded, use Hive/DataSourceManager
 
-  static const Map<String, double> _batteryCapacities = {
-    // XPENG G6
-    'G6_24LR': 87.5,
-    'G6_24SR': 66.0,
-    'G6_25LR': 80.8,
-    'G6_25SR': 68.5,
-    // XPENG G9
-    'G9_LR_AWD': 93.0,
-    'G9_LR_RWD': 93.0,
-    'G9_SR_RWD': 75.0,
-    // XPENG P7
-    'P7_LR_RWD': 82.7,
-    // Legacy keys
-    '24LR': 87.5,
-    '24SR': 66.0,
-    '25LR': 80.8,
-    '25SR': 68.5,
-  };
-
-  // Display labels for vehicle selection (only new keys shown in picker)
+  // Display labels for vehicle selection (only new keys shown in picker).
+  // The `CUSTOM` entry lets users running non-XPENG community profiles
+  // supply their own battery capacity (issue #7).
   static const Map<String, String> _modelLabels = {
     // XPENG G6
     'G6_24LR': 'G6 2024 LR/AWD (87.5 kWh)',
@@ -50,6 +36,8 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
     'G9_SR_RWD': 'G9 RWD Standard Range (75 kWh)',
     // XPENG P7
     'P7_LR_RWD': 'P7 RWD Long Range (82.7 kWh)',
+    // Custom (community profile / other brand)
+    customVehicleModelKey: 'Other / Custom (enter capacity below)',
   };
 
   // Legacy key mappings for display (existing users with old keys)
@@ -65,6 +53,12 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
     return _modelLabels[key] ?? _legacyLabels[key] ?? 'Unknown';
   }
 
+  bool get _isCustomModel => _vehicleModel == customVehicleModelKey;
+
+  /// Effective capacity for the current selection (custom override or table).
+  double get _effectiveBatteryKwh =>
+      resolveBatteryCapacity(_vehicleModel, _customBatteryKwh);
+
   @override
   void initState() {
     super.initState();
@@ -72,28 +66,117 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
+    String? loadedModel;
+    double? loadedCustomKwh;
+    bool loadedLegacy = false;
+
     // Try Hive first (most reliable on AI boxes)
     final hive = HiveStorageService.instance;
     if (hive.isAvailable) {
-      final hiveModel = hive.getSetting<String>('vehicle_model');
-      if (hiveModel != null) {
-        setState(() {
-          _vehicleModel = hiveModel;
-        });
-        debugPrint('[VehicleSettings] Loaded vehicle_model from Hive: $hiveModel');
-        return;
-      }
+      loadedModel = hive.getSetting<String>('vehicle_model');
+      loadedCustomKwh = hive.getSetting<double>('custom_battery_capacity_kwh');
     }
 
-    // Fallback to SharedPreferences
+    // SharedPreferences for anything Hive didn't have + the legacy-profile flag
     try {
       final prefs = await SharedPreferences.getInstance();
-      setState(() {
-        _vehicleModel = prefs.getString('vehicle_model') ?? '24LR';
-      });
-      debugPrint('[VehicleSettings] Loaded vehicle_model from SharedPreferences: $_vehicleModel');
+      loadedModel ??= prefs.getString('vehicle_model');
+      loadedCustomKwh ??= prefs.getDouble('custom_battery_capacity_kwh');
+      loadedLegacy = prefs.getBool('use_legacy_pid_profile_v3') ?? false;
     } catch (e) {
       debugPrint('[VehicleSettings] Failed to load settings: $e');
+    }
+
+    setState(() {
+      _vehicleModel = loadedModel ?? '24LR';
+      _customBatteryKwh = loadedCustomKwh;
+      _useLegacyV3Pids = loadedLegacy;
+    });
+    debugPrint('[VehicleSettings] Loaded vehicle_model=$_vehicleModel customKwh=$_customBatteryKwh legacyPids=$_useLegacyV3Pids');
+  }
+
+  Future<void> _setUseLegacyV3Pids(bool value) async {
+    setState(() => _useLegacyV3Pids = value);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('use_legacy_pid_profile_v3', value);
+    } catch (e) {
+      debugPrint('[VehicleSettings] Failed to save legacy PID flag: $e');
+    }
+    // Force the OBD service to re-migrate so the toggle takes effect immediately
+    // without an app restart.
+    await ref.read(obdServiceProvider).reloadPidProfile();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(value
+            ? 'Reverted to legacy v3 PID profile'
+            : 'Using v4 PID profile (WiCAN-corrected)'),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Future<void> _autoSaveDouble(String key, double value) async {
+    final hive = HiveStorageService.instance;
+    if (hive.isAvailable) {
+      await hive.saveSetting(key, value);
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(key, value);
+    } catch (e) {
+      debugPrint('[VehicleSettings] SharedPreferences save failed for $key: $e');
+    }
+  }
+
+  Future<void> _editCustomBatteryCapacity() async {
+    final controller = TextEditingController(
+      text: _customBatteryKwh != null ? _customBatteryKwh!.toStringAsFixed(1) : '',
+    );
+    final newValue = await showDialog<double>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Custom Battery Capacity'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Usable pack capacity in kWh. Used for range estimation and charging-session energy math.'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Capacity (kWh)',
+                hintText: 'e.g. 77.4',
+                border: OutlineInputBorder(),
+              ),
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final parsed = double.tryParse(controller.text.trim());
+              if (parsed != null && parsed > 0) {
+                Navigator.pop(context, parsed);
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (newValue != null) {
+      setState(() => _customBatteryKwh = newValue);
+      await _autoSaveDouble('custom_battery_capacity_kwh', newValue);
+      ref.read(mqttServiceProvider).invalidateBatteryCapacityCache();
     }
   }
 
@@ -141,22 +224,31 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Select Vehicle Model'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: _modelLabels.entries.map((entry) {
-            return RadioListTile<String>(
-              title: Text(entry.value),
-              value: entry.key,
-              groupValue: _vehicleModel,
-              onChanged: (value) {
-                if (value != null) {
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: _modelLabels.entries.map((entry) {
+              return RadioListTile<String>(
+                title: Text(entry.value),
+                value: entry.key,
+                groupValue: _vehicleModel,
+                onChanged: (value) async {
+                  if (value == null) return;
                   setState(() => _vehicleModel = value);
-                  _autoSaveString('vehicle_model', value);
+                  await _autoSaveString('vehicle_model', value);
+                  ref.read(mqttServiceProvider).invalidateBatteryCapacityCache();
+                  if (!mounted) return;
                   Navigator.pop(context);
-                }
-              },
-            );
-          }).toList(),
+                  // If user picked CUSTOM and we don't have a capacity yet,
+                  // prompt for one immediately so they don't end up at the
+                  // 87.5 kWh fallback (issue #7).
+                  if (value == customVehicleModelKey && _customBatteryKwh == null) {
+                    await _editCustomBatteryCapacity();
+                  }
+                },
+              );
+            }).toList(),
+          ),
         ),
       ),
     );
@@ -205,15 +297,37 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
                   ListTile(
                     leading: const Icon(Icons.battery_full),
                     title: const Text('Battery Capacity'),
-                    subtitle: Text('${_batteryCapacities[_vehicleModel]?.toStringAsFixed(1) ?? "--"} kWh'),
+                    subtitle: Text('${_effectiveBatteryKwh.toStringAsFixed(1)} kWh'
+                        '${_isCustomModel ? " (custom)" : ""}'),
+                    trailing: _isCustomModel
+                        ? const Icon(Icons.edit)
+                        : null,
+                    onTap: _isCustomModel ? _editCustomBatteryCapacity : null,
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Battery capacity is used for range estimation and energy calculations.',
+                    'Battery capacity is used for range estimation and energy calculations.'
+                    '${_isCustomModel ? " Tap to edit." : ""}',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).hintColor,
                     ),
                   ),
+                  if (_vehicleModel != customVehicleModelKey) ...[
+                    const Divider(),
+                    SwitchListTile(
+                      title: const Text('Use legacy v3 PIDs (XPENG only)'),
+                      subtitle: const Text(
+                        'Reverts to the pre-WiCAN-corrections PID profile. '
+                        'Use only if v4 reports incorrect values for your car.',
+                      ),
+                      value: _useLegacyV3Pids,
+                      onChanged: _setUseLegacyV3Pids,
+                      secondary: Icon(
+                        Icons.history,
+                        color: _useLegacyV3Pids ? Colors.orange : Colors.grey,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

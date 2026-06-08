@@ -664,7 +664,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
       // Guestimated Range moved from primary display (swapped with Speed)
       _MetricData('Guestimated Range', estimatedRange?.toStringAsFixed(0) ?? '--', 'km', Icons.route, Colors.green),
       _MetricData('State of Health', data.stateOfHealth?.toStringAsFixed(1) ?? '--', '%', Icons.health_and_safety, Colors.teal),
-      _MetricData('Charge Limit', (data.additionalProperties?['CHG_LIMIT'] as num?)?.toStringAsFixed(0) ?? '--', '%', Icons.battery_charging_full, Colors.amber),
+      // Charge Limit tile hidden in v1.4.20 — PID 221130 / formula [B4:B5]-10
+      // produces obviously wrong readings (1710%, 2100%) on the G6. PID is still
+      // polled so the raw bytes flow through value_json.rawBytes.CHG_LIMIT for
+      // diagnosis; re-enable once we have a confirmed formula.
       _MetricData('Battery Temp', data.batteryTemperature?.toStringAsFixed(1) ?? '--', '°C', Icons.thermostat, Colors.orange),
       _MetricData('12V Battery', auxVoltageStr, 'V', Icons.battery_full, auxVoltageColor),
       _MetricData('Cell ΔV', cellVoltageDelta, 'mV', Icons.battery_std, Colors.cyan),

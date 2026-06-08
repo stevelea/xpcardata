@@ -1,5 +1,77 @@
 # XPCarData Release Notes
 
+## Version 1.4.20 - 2026-06-06
+
+### Bug fix
+
+- **Hide broken Charge Limit reading**: PID `221130` with formula `[B4:B5]-10` was producing obviously wrong values on the G6 (1710%, 2100%). Until we have a confirmed correct formula from a debug log, the Charge Limit tile is hidden from the home screen and the `charge_limit` HA sensor is removed from discovery. PID is still polled so the raw hex bytes flow through `value_json.rawBytes.CHG_LIMIT` for analysis. On reconnect to MQTT after upgrading, the orphan `charge_limit` HA entity is automatically cleared.
+
+---
+
+## Version 1.4.19 - 2026-05-23
+
+### New Home Assistant entities for v4 PIDs
+
+v1.4.18 added new XPENG G6 PIDs to the polling but the values only landed in the raw `vehicles/<id>/data` MQTT payload — no HA discovery entries were declared so they didn't appear automatically as HA sensors. v1.4.19 adds discovery for:
+
+- **12V Battery** (`AUX_V`)
+- **VCU SoC** (`VCU_SOC`)
+- **Accelerator Pedal** (`ACCEL_PEDAL`)
+- **Brake Pressure** (`BRAKE_PRESSURE`)
+- **Front/Rear Motor RPM** (`FRONT_MOTOR_RPM`, `REAR_MOTOR_RPM`)
+- **Front/Rear Motor Torque Request** (`FRONT_MOTOR_TORQUE_REQ`, `REAR_MOTOR_TORQUE_REQ`)
+- **Motor Coolant Temp** (`MOTOR_T`)
+- **Battery Coolant Temp** (`COOLANT_T`)
+- **Fast Charge Temp 1/2** (`FAST_CHG_T1`, `FAST_CHG_T2`)
+- **Slow Charge Temp 1/2/3** (`SLOW_CHG_T1`, `SLOW_CHG_T2`, `SLOW_CHG_T3`)
+- **DC Charge Voltage / Current** (`DC_CHG_V`, `DC_CHG_A`) — useful during DC fast charging sessions
+
+These appear automatically in HA on next MQTT (re)connection after upgrading. Most are low-priority sensors that update every ~5 minutes (cached value published on intermediate cycles).
+
+---
+
+## Version 1.4.18 - 2026-05-23
+
+### XPENG G6 PID profile overhaul (v4)
+
+Corrected the G6 PID profile against community WiCAN definitions. The previous v3 profile had several PIDs on the wrong ECU and several others labelled as the wrong signal. v4 fixes them all. **On first launch after upgrading, the app will auto-migrate** to the new profile.
+
+If v4 misbehaves on your specific G6 firmware variant, **Settings → Vehicle → "Use legacy v3 PIDs"** toggle reverts to the old profile without needing an APK reinstall.
+
+#### Notable changes vs v3
+- **Odometer (`220101`)** moved from VCU to BMS, formula changed from `[B5:B6]` to `[B4:B6]` (3 bytes). Fixes issue #11 where the VCU response was being misread as `0x6201 = 25089 km` instead of the actual odometer.
+- **12V Auxiliary voltage (`220102`)** moved from VCU to BMS.
+- **`22031E`** was labelled `DC_CHG_STATUS` (formula `B4`); is actually `VCU_SOC` (formula `[B4:B5]/10`). Charging detection unchanged — uses HV current, not this PID.
+- **`22031A`** was labelled `HV_PWR`; is actually `REAR_MOTOR_TORQUE_REQ` (`[B4:B5]/4-500`). The reported `power` value is now always computed from `HV voltage × HV current` at the OBD service level, which was always the more accurate path.
+- **`220321`** was labelled `AC_CHG_A`; is actually `BRAKE_PRESSURE` (`[B4:B5]/5`). The AC charging UI panel was being triggered by this whenever brake was pressed — that spurious trigger is gone. DC charging UI still works (`DC_CHG_A` was correct).
+- **`220322`** was labelled `AC_CHG_V`; is actually `FAST_CHG_T1` (`B4-40`).
+- **`220325`** was labelled `INV_T`; is actually `SLOW_CHG_T2` (`B4-40`).
+- **`220313`** was labelled `RANGE_EST`; is actually `ACCEL_PEDAL` (`B4/2`).
+- **`220319`** `MOTOR_TORQUE` renamed `FRONT_MOTOR_TORQUE_REQ`, formula corrected to `[B4:B5]/4-500`.
+- **`220317`** motor RPM now applies the G6-specific `-16000` offset.
+- **New PIDs**: `220323` fast charging temp 2, `220324` slow charging temp 1, `220326` slow charging temp 3 (all `B4-40`).
+
+---
+
+## Version 1.4.17 - 2026-05-23
+
+### New Features
+
+- **Custom battery capacity (issue #7)**: vehicle picker now has a "Other / Custom" entry. When selected the user enters their pack's usable kWh, which is then used for range estimation, charging-session energy math, and MQTT publishing. Lets non-XPENG community-profile users (Kia, Hyundai, etc.) get correct numbers instead of the 87.5 kWh fallback.
+- **Custom PIDs included in backup (issue #8)**: backup/restore now includes the `obd_pids` setting (community-profile and user-added PIDs). On AI boxes the restore also writes directly to the `obd_pids.json` file fallback so PIDs survive a fresh install even if SharedPreferences is unreliable. Backup file format version bumped to v2 — v1 backups still import.
+- **Raw bytes per PID over MQTT (issue #9)**: each polled PID now publishes its cleaned hex byte string (with multi-frame and CAN-header prefixes stripped) under `value_json.rawBytes.<PID_NAME>`. HA template sensors can now extract individual bytes for multi-signal PIDs (e.g. Hyundai/Kia 220101 which packs 20 signals into one response) without re-implementing ELM327 parsing in Jinja.
+
+---
+
+## Version 1.4.16 - 2026-05-23
+
+### Bug Fixes
+
+- **OBD parser multi-frame fix (issue #5)**: Multi-frame ISO-TP responses (used by Kia/Hyundai PID `220101` and any other vehicle returning long PID payloads) now parse correctly. The parser previously ignored the per-frame `0:` / `1:` / `2:` sequence prefixes added by ELM327, which left a stray nibble in the byte stream and shifted every subsequent byte by half a position. Bytes now align with the formula's `B0`, `B1`, ... indices as intended.
+- **`last_collected` no longer advances when the car isn't responding (issue #4)**: When the OBD adapter is connected but every PID returns NaN / empty (car asleep, gateway timeout, etc.), the app no longer publishes a `VehicleData` message stamped with `DateTime.now()`. Home Assistant's `last_collected` attribute now reflects the time of the last *actual* successful poll, so users can tell whether SOC / range / etc. are live or stale.
+
+---
+
 ## Version 1.3.1 - 2026-01-13
 
 ### New Features
