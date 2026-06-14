@@ -409,8 +409,14 @@ class BackupService {
       // Custom / community-profile PIDs (stored as a JSON string in SharedPreferences).
       // Including this lets users carry their imported community profiles across
       // installs and devices (issue #8).
-      settings['obd_pids'] = prefs.getString('obd_pids');
-      settings['pid_profile_version'] = prefs.getInt('pid_profile_version');
+      final obdPids = prefs.getString('obd_pids');
+      if (obdPids != null && obdPids.isNotEmpty) {
+        settings['obd_pids'] = obdPids;
+      }
+      final pidVersion = prefs.getInt('pid_profile_version');
+      if (pidVersion != null) {
+        settings['pid_profile_version'] = pidVersion;
+      }
 
       // Home Location
       settings['home_latitude'] = prefs.getDouble('home_latitude');

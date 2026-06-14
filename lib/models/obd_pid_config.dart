@@ -84,7 +84,7 @@ class OBDPIDConfig {
   /// entity so HA template sensors can pull individual bytes out for
   /// multi-signal PIDs (issue #9).
   static String extractCleanedHex(String response) {
-    String parts = response.replaceAll(' ', '').replaceAll('>', '').trim().toUpperCase();
+    String parts = response.replaceAll(' ', '').replaceAll('>', '').replaceAll('\r', '').trim().toUpperCase();
 
     // Error responses → nothing useful to publish
     if (parts.contains('ERROR') ||
