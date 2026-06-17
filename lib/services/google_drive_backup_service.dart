@@ -409,7 +409,30 @@ class BackupService {
       // Custom / community-profile PIDs (stored as a JSON string in SharedPreferences).
       // Including this lets users carry their imported community profiles across
       // installs and devices (issue #8).
-      final obdPids = prefs.getString('obd_pids');
+      var obdPids = prefs.getString('obd_pids');
+
+      // Fallback: if not in SharedPreferences, try to read from file (especially for AI boxes)
+      if ((obdPids == null || obdPids.isEmpty)) {
+        try {
+          String? filePath;
+          try {
+            final directory = await getApplicationDocumentsDirectory();
+            filePath = '${directory.path}/obd_pids.json';
+          } catch (e) {
+            filePath = '/data/data/com.example.carsoc/files/obd_pids.json';
+          }
+          final file = File(filePath);
+          if (await file.exists()) {
+            obdPids = await file.readAsString();
+            if (obdPids != null && obdPids.isNotEmpty) {
+              debugPrint('[Backup] Loaded obd_pids from file fallback');
+            }
+          }
+        } catch (e) {
+          debugPrint('[Backup] Failed to read obd_pids.json file: $e');
+        }
+      }
+
       if (obdPids != null && obdPids.isNotEmpty) {
         settings['obd_pids'] = obdPids;
       }
