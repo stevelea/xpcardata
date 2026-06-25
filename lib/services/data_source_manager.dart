@@ -19,6 +19,7 @@ import 'debug_logger.dart';
 import 'hive_storage_service.dart';
 import 'keep_alive_service.dart';
 import 'background_service.dart';
+import 'github_update_service.dart';
 
 /// Data source types available
 enum DataSource {
@@ -56,6 +57,9 @@ class DataSourceManager {
 
   // 12V battery protection
   bool _auxBatteryProtectionEnabled = true;
+  // Auto update check
+  Timer? _updateCheckTimer;
+  DateTime? _lastUpdateCheck;
   double _auxBatteryProtectionThreshold = 12.8;
   bool _auxBatteryProtectionActive = false; // Currently paused due to low 12V
   static const double _auxBatteryHysteresis = 0.3; // Resume when voltage rises above threshold + hysteresis
@@ -76,6 +80,7 @@ class DataSourceManager {
     _chargingSessionService = ChargingSessionService(mqttService: mqttService);
     _setupProxyInterception();
     _setupChargingSessionListener();
+    _startUpdateCheckTimer();
   }
 
   /// Setup listener for charging session completion to send to fleet analytics
@@ -1049,9 +1054,48 @@ class DataSourceManager {
     return data;
   }
 
+  /// Start periodic update check (once daily)
+  void _startUpdateCheckTimer() {
+    _updateCheckTimer?.cancel();
+    // Check every 6 hours — only fires if 24h have passed
+    _updateCheckTimer = Timer.periodic(const Duration(hours: 6), (_) {
+      _checkForUpdatesDaily();
+    });
+    // Also check immediately on start
+    _checkForUpdatesDaily();
+  }
+
+  void _stopUpdateCheckTimer() {
+    _updateCheckTimer?.cancel();
+    _updateCheckTimer = null;
+  }
+
+  Future<void> _checkForUpdatesDaily() async {
+    final hive = HiveStorageService.instance;
+    final autoUpdateEnabled = hive.getSetting<bool>('auto_update_check') ?? false;
+    if (!autoUpdateEnabled) return;
+
+    final now = DateTime.now();
+    if (_lastUpdateCheck != null) {
+      final diff = now.difference(_lastUpdateCheck!);
+      if (diff.inHours < 24) return;
+    }
+
+    _lastUpdateCheck = now;
+    try {
+      await GitHubUpdateService.instance.checkForUpdates();
+      if (GitHubUpdateService.instance.updateAvailable) {
+        _logger.log('[DataSourceManager] Update available: ${GitHubUpdateService.instance.latestRelease?.version}');
+      }
+    } catch (_) {
+      // Silently ignore failures on auto-check
+    }
+  }
+
   /// Dispose and cleanup
   void dispose() {
     _stopCurrentSource();
+    _stopUpdateCheckTimer();
     _proxyPublishTimer?.cancel();
     _chargingSessionSubscription?.cancel();
     _locationService.stopTracking();

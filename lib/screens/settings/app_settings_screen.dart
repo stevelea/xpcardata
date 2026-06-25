@@ -45,6 +45,7 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
   bool _downloadingUpdate = false;
   double _downloadProgress = 0.0;
   String _version = '';
+  bool _autoUpdateEnabled = false;
 
   @override
   void initState() {
@@ -114,6 +115,7 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
         _highTempThreshold = hive.getSetting<double>('alert_high_temp') ?? 45.0;
         _auxBatteryProtectionEnabled = hive.getSetting<bool>('aux_battery_protection_enabled') ?? true;
         _auxBatteryProtectionThreshold = hive.getSetting<double>('aux_battery_protection_threshold') ?? 12.8;
+        _autoUpdateEnabled = hive.getSetting<bool>('auto_update_check') ?? false;
       });
       debugPrint('[AppSettings] Loaded settings from Hive');
       return;
@@ -133,6 +135,7 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
         _highTempThreshold = prefs.getDouble('alert_high_temp') ?? 45.0;
         _auxBatteryProtectionEnabled = prefs.getBool('aux_battery_protection_enabled') ?? true;
         _auxBatteryProtectionThreshold = prefs.getDouble('aux_battery_protection_threshold') ?? 12.8;
+        _autoUpdateEnabled = prefs.getBool('auto_update_check') ?? false;
       });
       debugPrint('[AppSettings] Loaded settings from SharedPreferences');
     } catch (e) {
@@ -1003,6 +1006,17 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  SwitchListTile(
+                    secondary: const Icon(Icons.update_disabled),
+                    title: const Text('Auto Update Check'),
+                    subtitle: const Text('Check daily for new versions'),
+                    value: _autoUpdateEnabled,
+                    onChanged: (value) {
+                      setState(() => _autoUpdateEnabled = value);
+                      _autoSaveBool('auto_update_check', value);
+                    },
+                  ),
+                  const Divider(),
                   ListTile(
                     leading: Icon(
                       Icons.system_update,

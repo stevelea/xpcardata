@@ -10,6 +10,7 @@ import '../services/obd_proxy_service.dart';
 import '../services/tailscale_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/fleet_analytics_service.dart';
+import '../services/github_update_service.dart';
 import '../services/mock_data_service.dart';
 import '../services/bm300_battery_service.dart';
 import '../widgets/dashboard_widgets.dart';
@@ -296,6 +297,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
                   _buildStatusBar(currentDataSource, vehicleDataAsync, isTablet),
                   SizedBox(height: isTablet ? 20 : 12),
 
+                  // Update Available Banner
+                  _buildUpdateAvailableBanner(context),
+
                   // 12V Battery Protection Warning Banner
                   _build12VProtectionWarning(),
 
@@ -333,6 +337,60 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
             ),
           );
         },
+      ),
+    );
+  }
+
+  /// Build update available notification banner
+  Widget _buildUpdateAvailableBanner(BuildContext context) {
+    final updateService = GitHubUpdateService.instance;
+    if (!updateService.updateAvailable) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.orange.shade700,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.orange.withOpacity(0.4),
+            blurRadius: 8,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.system_update, color: Colors.white, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Version ${updateService.latestRelease?.version} available',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Tap to download and install',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.85),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right, color: Colors.white),
+        ],
       ),
     );
   }
