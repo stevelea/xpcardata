@@ -29,7 +29,11 @@ migrate_working_dir/
 .dart_tool/
 .flutter-plugins-dependencies
 .pub-cache/
+.pub_cache/
 .pub/
+.flutter_sdk/
+.gradle_home/
+.home/
 /build/
 /coverage/
 

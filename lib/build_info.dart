@@ -3,5 +3,5 @@
 class BuildInfo {
   /// The date and time when this build was created
   /// Format: YYYY-MM-DD HH:MM
-  static const String buildDateTime = '2026-01-12 11:34';
+  static const String buildDateTime = '2026-06-25 13:03';
 }

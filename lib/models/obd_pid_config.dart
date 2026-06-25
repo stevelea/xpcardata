@@ -116,6 +116,13 @@ class OBDPIDConfig {
       parts = parts.substring(0, parts.length - 1);
     }
 
+    // Reject if too short after all stripping (minimum 2 bytes = 4 chars).
+    // Without this, flow-control frames like "001 0:23" slip through the
+    // pre-strip length guard and produce useless single-byte outputs.
+    if (parts.length < 4) {
+      return '';
+    }
+
     return parts;
   }
 
@@ -126,8 +133,8 @@ class OBDPIDConfig {
   /// Examples: "B3", "[B4:B5]/10", "A<<8+B", "(A*256+B)/10", "A-40"
   static double parseWithFormula(String response, String formula) {
     try {
-      // Remove spaces, prompt character, and trim
-      String parts = response.replaceAll(' ', '').replaceAll('>', '').trim().toUpperCase();
+      // Remove spaces, prompt character, CRs, and trim
+      String parts = response.replaceAll(' ', '').replaceAll('>', '').replaceAll('\r', '').trim().toUpperCase();
 
       // Handle ELM327 multi-frame ISO-TP responses (used by Kia/Hyundai PID 220101 etc).
       // Format with ATCAF1: "LLL N1:DATA1 N2:DATA2..." where LLL is the 3-hex-char total
@@ -489,8 +496,8 @@ class OBDPIDConfig {
   static List<double> parseCellVoltages(String response) {
     final voltages = <double>[];
     try {
-      // Remove spaces and get raw hex
-      String parts = response.replaceAll(' ', '').replaceAll('>', '').trim().toUpperCase();
+      // Remove spaces, prompt character, CRs, and trim
+      String parts = response.replaceAll(' ', '').replaceAll('>', '').replaceAll('\r', '').trim().toUpperCase();
 
       // Multi-frame response contains multiple frames like:
       // 78410E3621122C7C8C7 (first frame with header)
@@ -569,7 +576,7 @@ class OBDPIDConfig {
   static List<double> parseCellTemperatures(String response) {
     final temps = <double>[];
     try {
-      String parts = response.replaceAll(' ', '').replaceAll('>', '').trim().toUpperCase();
+      String parts = response.replaceAll(' ', '').replaceAll('>', '').replaceAll('\r', '').trim().toUpperCase();
 
       // Split into frames (each starts with 784)
       final frames = <String>[];
