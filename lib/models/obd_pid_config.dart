@@ -73,6 +73,33 @@ class OBDPIDConfig {
     );
   }
 
+  /// Check whether an OBD response contains the expected PID echo bytes.
+  /// This prevents late/stale responses from a previous PID poll being
+  /// misattributed to the current PID (which caused AUX_V to read 6.2V
+  /// from a late DC_CHG_A response — issue reported for XPENG G6 12V).
+  ///
+  /// Expected PID format: "22031F" → echo bytes are "031F" (positions 4-7
+  /// in the stripped response).
+  static bool responseMatchesPid(String response, String expectedPid) {
+    if (expectedPid.length < 4) return true; // Can't validate short PIDs
+    final expectedEcho = expectedPid.substring(expectedPid.length - 4);
+    // Strip to the same format the parser sees: no spaces, CRs, or prompt
+    String parts = response.replaceAll(' ', '').replaceAll('>', '').replaceAll('\r', '').trim().toUpperCase();
+    // Multi-frame stripping
+    if (RegExp(r'[0-9A-F]:').hasMatch(parts)) {
+      parts = parts.replaceAll(RegExp(r'[0-9A-F]:'), '');
+      if (parts.length >= 3) parts = parts.substring(3);
+    }
+    // 3-nibble CAN header stripping
+    if (parts.length >= 3 && RegExp(r'^7[0-9A-F]{2}$').hasMatch(parts.substring(0, 3))) {
+      parts = parts.substring(3);
+    }
+    // PID echo is at positions 4-7 (after length byte + service byte 62)
+    if (parts.length < 8) return false;
+    final echo = parts.substring(4, 8);
+    return echo == expectedEcho;
+  }
+
   /// Return the cleaned hex byte string for an OBD response: whitespace and
   /// prompt char stripped, multi-frame ISO-TP sequence prefixes and length
   /// header removed, 3-nibble CAN header (e.g. "784", "7E8") stripped, so

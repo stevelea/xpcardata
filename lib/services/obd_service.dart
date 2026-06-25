@@ -1012,6 +1012,14 @@ class OBDService {
             continue;
           }
 
+          // Validate PID echo to prevent late/stale responses from
+          // a previous poll contaminating this PID (12V false-low bug).
+          if (pidConfig.pid.length >= 4 &&
+              !OBDPIDConfig.responseMatchesPid(response, pidConfig.pid)) {
+            _logger.log('[OBDService] ${pidConfig.name}: response PID mismatch, discarding (expected ${pidConfig.pid})');
+            continue;
+          }
+
           final value = pidConfig.parser(response);
 
           // Skip if value is NaN (indicates error/unsupported PID)
