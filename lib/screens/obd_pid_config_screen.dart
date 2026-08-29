@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:flutter/services.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
@@ -409,6 +411,74 @@ class _OBDPIDConfigScreenState extends State<OBDPIDConfigScreen> {
     );
   }
 
+  /// Export the current PIDs to JSON via the share sheet and clipboard.
+  ///
+  /// The app's internal obd_pids.json lives in the private app sandbox, which
+  /// file managers can't browse on a non-rooted device (issue #13). This gives
+  /// users a supported way to view/hand-edit their PIDs — the clipboard copy
+  /// always works, and the share sheet lets them save to a file or another app.
+  Future<void> _exportPIDs() async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    try {
+      final pidsJson = json.encode(_pids.map((p) => p.toJson()).toList());
+
+      // Clipboard first — no file-system dependency, works on AI boxes too.
+      await Clipboard.setData(ClipboardData(text: pidsJson));
+      debugPrint('[PID Export] Copied ${_pids.length} PIDs to clipboard');
+
+      // Then share as a file when possible.
+      try {
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final fileName = 'obd_pids_$timestamp.json';
+        String filePath;
+        try {
+          final directory = await getApplicationCacheDirectory();
+          filePath = '${directory.path}/$fileName';
+        } catch (_) {
+          filePath = '/data/data/com.example.carsoc/cache/$fileName';
+        }
+        final file = File(filePath);
+        await file.writeAsString(pidsJson);
+
+        await Share.shareXFiles(
+          [XFile(filePath, mimeType: 'application/json')],
+          subject: 'XPCarData PIDs',
+          text: 'XPCarData custom OBD-II PIDs (${_pids.length})',
+        );
+        debugPrint('[PID Export] Share sheet opened');
+      } catch (e) {
+        debugPrint('[PID Export] Share failed (clipboard still set): $e');
+        if (mounted) {
+          scaffoldMessenger.showSnackBar(
+            SnackBar(
+              content: Text('PIDs copied to clipboard (share unavailable: $e)'),
+            ),
+          );
+        }
+        return;
+      }
+
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text('Exported ${_pids.length} PIDs — copied to clipboard'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[PID Export] Export failed: $e');
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: Text('Export failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   void _deletePID(int index) {
     setState(() {
       _pids.removeAt(index);
@@ -449,6 +519,11 @@ class _OBDPIDConfigScreenState extends State<OBDPIDConfigScreen> {
       appBar: AppBar(
         title: const Text('OBD-II PID Configuration'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.ios_share),
+            onPressed: _exportPIDs,
+            tooltip: 'Export PIDs',
+          ),
           IconButton(
             icon: const Icon(Icons.delete_sweep),
             onPressed: _clearAllPIDs,
