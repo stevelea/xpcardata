@@ -942,6 +942,10 @@ class OBDService {
       // pull individual bytes out for multi-signal PIDs without re-implementing
       // ELM327 multi-frame parsing in Jinja.
       final Map<String, String> rawBytesByPid = {};
+      // Reuse a single response for all parameters sharing the same PID
+      // (issue #6: multi-signal PIDs pack many values in one response, and
+      // requesting the same PID once per value is wasteful).
+      final Map<String, String> polledResponses = {};
       bool gotAnyData = false; // True if at least one PID was successfully polled
 
       if (_customPIDs.isEmpty) {
@@ -1005,7 +1009,18 @@ class OBDService {
             _logger.log('[OBDService] Header switch complete: ATSH=$headerResult, ATCRA=$craResult, ATFCSH=$fcshResult');
           }
 
-          final response = await _sendCommand(pidConfig.pid);
+          // Reuse a response already polled this cycle for the same PID,
+          // instead of sending a duplicate request (issue #6).
+          final cacheKey = '${pidConfig.header ?? ''}:${pidConfig.pid}';
+          String response;
+          if (polledResponses.containsKey(cacheKey) &&
+              polledResponses[cacheKey]!.isNotEmpty) {
+            response = polledResponses[cacheKey]!;
+            _logger.log('[OBDService] ${pidConfig.name}: reusing response for PID ${pidConfig.pid}');
+          } else {
+            response = await _sendCommand(pidConfig.pid);
+            polledResponses[cacheKey] = response;
+          }
 
           // Skip if empty response
           if (response.isEmpty) {
