@@ -164,8 +164,19 @@ class ConnectivityWatchdogService {
     try {
       final isVpnActive = await _tailscale.checkVpnStatus();
 
-      if (!isVpnActive) {
-        _logger.log('[Watchdog] Tailscale VPN not active, attempting reconnect...');
+      // A VPN "active" reading can be a false positive (issue #10): Android
+      // may keep Tailscale's tun0 interface registered even after the actual
+      // tunnel has dropped (background throttling, DERP unreachable, stale
+      // session). If MQTT is down while the VPN reports active, still attempt
+      // a Tailscale re-wake once per cycle instead of trusting the interface.
+      final mqttDown = _mqttService != null && !_mqttService!.isConnected;
+
+      if (!isVpnActive || mqttDown) {
+        if (!isVpnActive) {
+          _logger.log('[Watchdog] Tailscale VPN not active, attempting reconnect...');
+        } else {
+          _logger.log('[Watchdog] VPN reports active but MQTT is down, re-waking Tailscale...');
+        }
         _tailscaleReconnectAttempts++;
         _lastTailscaleReconnect = DateTime.now();
 
