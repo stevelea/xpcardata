@@ -475,34 +475,50 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
       elevation: 1,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
-        padding: EdgeInsets.all(isTablet ? 16 : 12),
-        child: isTablet
-            ? Row(
+        padding: EdgeInsets.all(isTablet ? 14 : 10),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // Determine if all items can fit on a single line.
+            // Data source (~120px) + timestamp (~85px) + 9 service indicators (~650px) = ~855px.
+            final canFitSingleLine = constraints.maxWidth >= 880;
+
+            if (canFitSingleLine) {
+              return Row(
                 children: [
-                  // Data source badge
                   _buildDataSourceWidget(currentDataSource),
-                  const SizedBox(width: 16),
-                  // Timestamp
+                  const SizedBox(width: 8),
                   _buildTimestampWidget(vehicleDataAsync),
                   const Spacer(),
-                  // Service status row
-                  _buildServiceStatusRow(ref),
-                ],
-              )
-            : Column(
-                children: [
-                  // Top row: Data source and timestamp
-                  Row(
-                    children: [
-                      Expanded(child: _buildDataSourceWidget(currentDataSource)),
-                      _buildTimestampWidget(vehicleDataAsync),
-                    ],
+                  Flexible(
+                    child: _buildServiceStatusRow(ref, alignment: WrapAlignment.end),
                   ),
-                  const SizedBox(height: 12),
-                  // Bottom row: Service status icons
-                  _buildServiceStatusRow(ref),
                 ],
-              ),
+              );
+            }
+
+            // When width is constrained, adaptively wrap into lines within the same bar
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    _buildDataSourceWidget(currentDataSource),
+                    _buildTimestampWidget(vehicleDataAsync),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: _buildServiceStatusRow(ref, alignment: WrapAlignment.start),
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -556,11 +572,40 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
     return vehicleDataAsync.when(
       data: (data) {
         if (data == null) return const SizedBox.shrink();
-        return Text(
-          _formatTimestamp(data.timestamp),
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.grey[600],
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final textColor = isDark ? Colors.grey[300] : Colors.grey[700];
+        final iconColor = isDark ? Colors.grey[400] : Colors.grey[600];
+        final bgColor = isDark ? Colors.white.withAlpha(15) : Colors.grey[100]!;
+        final borderColor = isDark ? Colors.white.withAlpha(30) : Colors.grey.withAlpha(77);
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: borderColor),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.access_time,
+                size: 13,
+                color: iconColor,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                _formatTimestamp(data.timestamp),
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.visible,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: textColor,
+                ),
+              ),
+            ],
           ),
         );
       },
@@ -621,6 +666,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
 
         // Cell voltages section (expandable)
         _buildCellVoltagesSection(data, isCompact, isTablet),
+
+        // Cell temperatures section (expandable)
+        _buildCellTemperaturesSection(data, isCompact, isTablet),
       ],
     );
   }
@@ -1714,6 +1762,181 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
     );
   }
 
+  /// Build cell temperatures section (expandable)
+  /// Shows all individual cell/module temperatures in a compact grid when expanded
+  Widget _buildCellTemperaturesSection(VehicleData data, bool isCompact, bool isTablet) {
+    // Get cell temperatures from additionalProperties
+    final cellTempsRaw = data.additionalProperties?['cellTemperatures'];
+    if (cellTempsRaw == null || cellTempsRaw is! List || cellTempsRaw.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final temps = cellTempsRaw.cast<double>();
+    final sensorCount = temps.length;
+
+    // Calculate stats
+    final minT = temps.reduce((a, b) => a < b ? a : b);
+    final maxT = temps.reduce((a, b) => a > b ? a : b);
+    final deltaT = maxT - minT;
+
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(height: isTablet ? 16 : 8),
+        if (isTablet)
+          const DashboardSectionHeader(
+            title: 'CELL TEMPERATURES',
+            icon: Icons.grid_view,
+          ),
+        Card(
+          elevation: 1,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: ExpansionTile(
+            initiallyExpanded: false,
+            tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            leading: Icon(
+              Icons.thermostat,
+              color: theme.colorScheme.primary,
+            ),
+            title: Text(
+              '$sensorCount Sensors',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: isCompact ? 14 : 16,
+              ),
+            ),
+            subtitle: Text(
+              'Min: ${minT.toStringAsFixed(1)}°C  Max: ${maxT.toStringAsFixed(1)}°C  Δ: ${deltaT.toStringAsFixed(1)}°C',
+              style: TextStyle(
+                fontSize: isCompact ? 12 : 13,
+                color: deltaT > 5 ? Colors.orange : theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            children: [
+              _buildCellTemperatureGrid(temps, minT, maxT, isCompact),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Build the grid of cell temperatures with color coding
+  Widget _buildCellTemperatureGrid(List<double> temps, double minT, double maxT, bool isCompact) {
+    final theme = Theme.of(context);
+    final sensorCount = temps.length;
+    final cellSize = isCompact ? 28.0 : 32.0;
+    final fontSize = isCompact ? 9.0 : 10.0;
+    final deltaT = maxT - minT;
+
+    // Color scale: green (high) to yellow (mid) to red (low)
+    Color getTemperatureColor(double t) {
+      if (maxT == minT) return Colors.green;
+      final normalized = (t - minT) / (maxT - minT); // 0 = lowest, 1 = highest
+      if (normalized > 0.8) return Colors.green;
+      if (normalized > 0.5) return Colors.lightGreen;
+      if (normalized > 0.3) return Colors.yellow.shade700;
+      if (normalized > 0.1) return Colors.orange;
+      return Colors.red;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Legend
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            children: [
+              Text(
+                'Avg: ${(temps.reduce((a, b) => a + b) / sensorCount).toStringAsFixed(1)}°C',
+                style: TextStyle(
+                  fontSize: fontSize + 2,
+                  fontWeight: FontWeight.w500,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const Spacer(),
+              // Color legend
+              Container(
+                width: 12, height: 12,
+                decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(2)),
+              ),
+              const SizedBox(width: 2),
+              Text('Low', style: TextStyle(fontSize: fontSize)),
+              const SizedBox(width: 8),
+              Container(
+                width: 12, height: 12,
+                decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(2)),
+              ),
+              const SizedBox(width: 2),
+              Text('High', style: TextStyle(fontSize: fontSize)),
+            ],
+          ),
+        ),
+        // Grid of cells
+        Wrap(
+          spacing: 2,
+          runSpacing: 2,
+          children: List.generate(sensorCount, (index) {
+            final t = temps[index];
+            final color = getTemperatureColor(t);
+            return Tooltip(
+              message: 'Sensor ${index + 1}: ${t.toStringAsFixed(1)}°C',
+              child: Container(
+                width: cellSize,
+                height: cellSize,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.8),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: t == minT
+                        ? Colors.red.shade900
+                        : t == maxT
+                            ? Colors.green.shade900
+                            : Colors.transparent,
+                    width: t == minT || t == maxT ? 2 : 0,
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  '${index + 1}',
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    fontWeight: FontWeight.w500,
+                    color: color.computeLuminance() > 0.5 ? Colors.black87 : Colors.white,
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
+        // Summary row
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildCellStatChip('Lowest', '${minT.toStringAsFixed(1)}°C', Colors.red, fontSize),
+              _buildCellStatChip('Highest', '${maxT.toStringAsFixed(1)}°C', Colors.green, fontSize),
+              _buildCellStatChip(
+                'Delta',
+                '${deltaT.toStringAsFixed(1)}°C',
+                deltaT > 5 ? Colors.orange : Colors.blue,
+                fontSize,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   /// Format timestamp to human-readable format
   String _formatTimestamp(DateTime timestamp) {
     final now = DateTime.now();
@@ -1740,7 +1963,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
 
   /// Build service status indicator row
   /// For LHD: status icons are reversed so settings/status are on left (driver side)
-  Widget _buildServiceStatusRow(WidgetRef ref) {
+  Widget _buildServiceStatusRow(
+    WidgetRef ref, {
+    WrapAlignment alignment = WrapAlignment.start,
+  }) {
     final mqttService = ref.watch(mqttServiceProvider);
     final manager = ref.watch(dataSourceManagerProvider);
     final proxyService = OBDProxyService.instance;
@@ -1833,9 +2059,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
 
     // LHD: reverse order so status/settings icons are on left (driver side)
     return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      alignment: WrapAlignment.center,
+      spacing: 6,
+      runSpacing: 6,
+      alignment: alignment,
       children: isLhd ? indicators.reversed.toList() : indicators,
     );
   }

@@ -83,21 +83,57 @@ class OBDPIDConfig {
   static bool responseMatchesPid(String response, String expectedPid) {
     if (expectedPid.length < 4) return true; // Can't validate short PIDs
     final expectedEcho = expectedPid.substring(expectedPid.length - 4);
-    // Strip to the same format the parser sees: no spaces, CRs, or prompt
-    String parts = response.replaceAll(' ', '').replaceAll('>', '').replaceAll('\r', '').trim().toUpperCase();
-    // Multi-frame stripping
+    // Strip to the same format the parser sees: no spaces, CRs, LFs, or prompt
+    String parts = response.replaceAll(' ', '').replaceAll('>', '').replaceAll('\r', '').replaceAll('\n', '').trim().toUpperCase();
+    // Multi-frame stripping (ELM327 ATCAF1 format)
     if (RegExp(r'[0-9A-F]:').hasMatch(parts)) {
       parts = parts.replaceAll(RegExp(r'[0-9A-F]:'), '');
       if (parts.length >= 3) parts = parts.substring(3);
     }
-    // 3-nibble CAN header stripping
+    // 3-nibble CAN header stripping (e.g., 784, 7E8)
     if (parts.length >= 3 && RegExp(r'^7[0-9A-F]{2}$').hasMatch(parts.substring(0, 3))) {
       parts = parts.substring(3);
     }
-    // PID echo is at positions 4-7 (after length byte + service byte 62)
-    if (parts.length < 8) return false;
-    final echo = parts.substring(4, 8);
-    return echo == expectedEcho;
+
+    // 1) ISO-TP First Frame (multi-frame): starts with '1', 4-char PCI header (e.g., "104B"),
+    // followed by service response byte (e.g., "62") and 4-char PID echo (e.g., "1122").
+    // Format: [1LLL][62][PID][data...]
+    if (parts.startsWith('1') && parts.length >= 10) {
+      final echo = parts.substring(6, 10);
+      if (echo == expectedEcho) return true;
+    }
+
+    // 2) ISO-TP Single Frame: starts with '0', 2-char PCI header (e.g., "05"),
+    // followed by service response byte (e.g., "62") and 4-char PID echo (e.g., "1109").
+    // Format: [0L][62][PID][data...]
+    if (parts.startsWith('0') && parts.length >= 8) {
+      final echo = parts.substring(4, 8);
+      if (echo == expectedEcho) return true;
+    }
+
+    // 3) Direct response (no PCI / already stripped): service byte at start
+    // Format: [62][PID][data...]
+    if (parts.startsWith('62') && parts.length >= 6) {
+      final echo = parts.substring(2, 6);
+      if (echo == expectedEcho) return true;
+    }
+
+    // 4) Fallback: compute expected positive service response byte (Mode 22 -> 62, Mode 01 -> 41)
+    // and check if [serviceResponse][PID] appears near the start of the frame.
+    if (expectedPid.length >= 2) {
+      final serviceVal = int.tryParse(expectedPid.substring(0, 2), radix: 16);
+      if (serviceVal != null) {
+        final posService = (serviceVal + 0x40).toRadixString(16).toUpperCase().padLeft(2, '0');
+        final echoChars = expectedPid.length == 4 ? expectedPid.substring(2) : expectedEcho;
+        final pattern = '$posService$echoChars';
+        final idx = parts.indexOf(pattern);
+        if (idx >= 0 && idx <= 6) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   /// Return the cleaned hex byte string for an OBD response: whitespace and
@@ -111,7 +147,7 @@ class OBDPIDConfig {
   /// entity so HA template sensors can pull individual bytes out for
   /// multi-signal PIDs (issue #9).
   static String extractCleanedHex(String response) {
-    String parts = response.replaceAll(' ', '').replaceAll('>', '').replaceAll('\r', '').trim().toUpperCase();
+    String parts = response.replaceAll(' ', '').replaceAll('>', '').replaceAll('\r', '').replaceAll('\n', '').trim().toUpperCase();
 
     // Error responses → nothing useful to publish
     if (parts.contains('ERROR') ||
@@ -523,23 +559,24 @@ class OBDPIDConfig {
   static List<double> parseCellVoltages(String response) {
     final voltages = <double>[];
     try {
-      // Remove spaces, prompt character, CRs, and trim
-      String parts = response.replaceAll(' ', '').replaceAll('>', '').replaceAll('\r', '').trim().toUpperCase();
+      // Remove spaces, prompt character, CRs, LFs, and trim
+      String parts = response.replaceAll(' ', '').replaceAll('>', '').replaceAll('\r', '').replaceAll('\n', '').trim().toUpperCase();
 
-      // Multi-frame response contains multiple frames like:
-      // 78410E3621122C7C8C7 (first frame with header)
-      // 78421C8C7C8C7C8C8C8 (consecutive frames)
-      // Each frame has: [3-char CAN ID][frame type/seq][data bytes...]
+      // Detect CAN ID dynamically from response header (e.g., 784, 7E8)
+      String canId = '784';
+      if (parts.length >= 3 && RegExp(r'^7[0-9A-F]{2}$').hasMatch(parts.substring(0, 3))) {
+        canId = parts.substring(0, 3);
+      }
 
-      // Split into frames (each starts with 784)
+      // Split into frames (each starts with canId)
       final frames = <String>[];
       int idx = 0;
       while (idx < parts.length) {
-        final frameStart = parts.indexOf('784', idx);
+        final frameStart = parts.indexOf(canId, idx);
         if (frameStart < 0) break;
 
         // Find next frame or end
-        final nextFrame = parts.indexOf('784', frameStart + 3);
+        final nextFrame = parts.indexOf(canId, frameStart + 3);
         final frameEnd = nextFrame > 0 ? nextFrame : parts.length;
         frames.add(parts.substring(frameStart, frameEnd));
         idx = frameEnd;
@@ -547,19 +584,27 @@ class OBDPIDConfig {
 
       if (frames.isEmpty) return voltages;
 
-      // Parse first frame (has length and PID echo)
-      // Format: 784[10][length][62][PID][data...]
+      // Check ISO-TP First Frame length (12-bit length in bytes)
+      // Format: [CAN ID 3 chars][1][length 3 chars][62][PID 4 chars][data...]
+      // e.g., 784 1 04B 62 1122 ... -> total length is 0x04B = 75 bytes
+      // minus 3 bytes (service 62 + 2 bytes PID) = 72 data bytes
+      int expectedDataBytes = 0;
       if (frames.isNotEmpty && frames[0].length >= 13) {
         final firstFrame = frames[0];
-        // Skip: 784 (3) + 10 (2) + length (2) + 62 (2) + 1122 (4) = 13 chars
+        if (firstFrame.length >= 7 && firstFrame[3] == '1') {
+          final totalPayloadLen = int.tryParse(firstFrame.substring(4, 7), radix: 16) ?? 0;
+          if (totalPayloadLen > 3) {
+            expectedDataBytes = totalPayloadLen - 3;
+          }
+        }
+
         final dataStart = 13;
         for (int i = dataStart; i < firstFrame.length - 1; i += 2) {
+          if (expectedDataBytes > 0 && voltages.length >= expectedDataBytes) break;
           final hexByte = firstFrame.substring(i, i + 2);
-          if (hexByte == 'FF') continue; // Skip padding
+          if (hexByte == 'FF' || hexByte == '55' || hexByte == 'AA') continue; // Skip padding
           if (RegExp(r'^[0-9A-F]{2}$').hasMatch(hexByte)) {
             final rawValue = int.parse(hexByte, radix: 16);
-            // Convert to voltage: value * 0.02 (no offset)
-            // Raw 0xBF (191) = 3.82V, 0xC0 (192) = 3.84V
             final voltage = rawValue * 0.02;
             if (voltage >= 2.5 && voltage <= 4.5) {
               voltages.add(voltage);
@@ -569,19 +614,20 @@ class OBDPIDConfig {
       }
 
       // Parse consecutive frames
-      // Format: 784[2X][data...] where X is sequence number
+      // Format: [CAN ID][2X][data...] where X is sequence number
       for (int f = 1; f < frames.length; f++) {
+        if (expectedDataBytes > 0 && voltages.length >= expectedDataBytes) break;
         final frame = frames[f];
         if (frame.length < 5) continue;
 
-        // Skip: 784 (3) + 2X (2) = 5 chars
+        // Skip: CAN ID (3) + 2X (2) = 5 chars
         final dataStart = 5;
         for (int i = dataStart; i < frame.length - 1; i += 2) {
+          if (expectedDataBytes > 0 && voltages.length >= expectedDataBytes) break;
           final hexByte = frame.substring(i, i + 2);
-          if (hexByte == 'FF' || hexByte == '55') continue; // Skip padding
+          if (hexByte == 'FF' || hexByte == '55' || hexByte == 'AA') continue; // Skip padding
           if (RegExp(r'^[0-9A-F]{2}$').hasMatch(hexByte)) {
             final rawValue = int.parse(hexByte, radix: 16);
-            // Convert to voltage: value * 0.02 (no offset)
             final voltage = rawValue * 0.02;
             if (voltage >= 2.5 && voltage <= 4.5) {
               voltages.add(voltage);
@@ -603,16 +649,22 @@ class OBDPIDConfig {
   static List<double> parseCellTemperatures(String response) {
     final temps = <double>[];
     try {
-      String parts = response.replaceAll(' ', '').replaceAll('>', '').replaceAll('\r', '').trim().toUpperCase();
+      String parts = response.replaceAll(' ', '').replaceAll('>', '').replaceAll('\r', '').replaceAll('\n', '').trim().toUpperCase();
 
-      // Split into frames (each starts with 784)
+      // Detect CAN ID dynamically from response header (e.g., 784, 7E8)
+      String canId = '784';
+      if (parts.length >= 3 && RegExp(r'^7[0-9A-F]{2}$').hasMatch(parts.substring(0, 3))) {
+        canId = parts.substring(0, 3);
+      }
+
+      // Split into frames (each starts with canId)
       final frames = <String>[];
       int idx = 0;
       while (idx < parts.length) {
-        final frameStart = parts.indexOf('784', idx);
+        final frameStart = parts.indexOf(canId, idx);
         if (frameStart < 0) break;
 
-        final nextFrame = parts.indexOf('784', frameStart + 3);
+        final nextFrame = parts.indexOf(canId, frameStart + 3);
         final frameEnd = nextFrame > 0 ? nextFrame : parts.length;
         frames.add(parts.substring(frameStart, frameEnd));
         idx = frameEnd;
@@ -620,13 +672,22 @@ class OBDPIDConfig {
 
       if (frames.isEmpty) return temps;
 
-      // Parse first frame
+      // Check ISO-TP First Frame length (12-bit length in bytes)
+      int expectedDataBytes = 0;
       if (frames.isNotEmpty && frames[0].length >= 13) {
         final firstFrame = frames[0];
+        if (firstFrame.length >= 7 && firstFrame[3] == '1') {
+          final totalPayloadLen = int.tryParse(firstFrame.substring(4, 7), radix: 16) ?? 0;
+          if (totalPayloadLen > 3) {
+            expectedDataBytes = totalPayloadLen - 3;
+          }
+        }
+
         final dataStart = 13; // Skip header
         for (int i = dataStart; i < firstFrame.length - 1; i += 2) {
+          if (expectedDataBytes > 0 && temps.length >= expectedDataBytes) break;
           final hexByte = firstFrame.substring(i, i + 2);
-          if (hexByte == 'FF') continue;
+          if (hexByte == 'FF' || hexByte == '55' || hexByte == 'AA') continue;
           if (RegExp(r'^[0-9A-F]{2}$').hasMatch(hexByte)) {
             final rawValue = int.parse(hexByte, radix: 16);
             final temp = rawValue.toDouble() - 40.0;
@@ -639,13 +700,15 @@ class OBDPIDConfig {
 
       // Parse consecutive frames
       for (int f = 1; f < frames.length; f++) {
+        if (expectedDataBytes > 0 && temps.length >= expectedDataBytes) break;
         final frame = frames[f];
         if (frame.length < 5) continue;
 
         final dataStart = 5;
         for (int i = dataStart; i < frame.length - 1; i += 2) {
+          if (expectedDataBytes > 0 && temps.length >= expectedDataBytes) break;
           final hexByte = frame.substring(i, i + 2);
-          if (hexByte == 'FF' || hexByte == '55') continue;
+          if (hexByte == 'FF' || hexByte == '55' || hexByte == 'AA') continue;
           if (RegExp(r'^[0-9A-F]{2}$').hasMatch(hexByte)) {
             final rawValue = int.parse(hexByte, radix: 16);
             final temp = rawValue.toDouble() - 40.0;

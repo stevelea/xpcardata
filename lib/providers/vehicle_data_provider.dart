@@ -23,6 +23,7 @@ const Map<String, double> vehicleBatteryCapacities = {
   'G9_SR_RWD': 75.0, // G9 RWD Standard Range (LFP) - ~75 kWh usable
   // XPENG P7
   'P7_LR_RWD': 82.7, // P7 RWD Long Range (NMC)
+  'G3i_SR_RWD': 55.0, // G3i RWD Standard Range (LFP)
   // Legacy keys for backwards compatibility
   '24LR': 87.5,
   '24SR': 66.0,

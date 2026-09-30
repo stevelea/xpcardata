@@ -36,6 +36,8 @@ class _VehicleSettingsScreenState extends ConsumerState<VehicleSettingsScreen> {
     'G9_SR_RWD': 'G9 RWD Standard Range (75 kWh)',
     // XPENG P7
     'P7_LR_RWD': 'P7 RWD Long Range (82.7 kWh)',
+    // XPENG G3
+    'G3i_SR_RWD': 'G3i 460 RWD Standard Range (55 kWh)',
     // Custom (community profile / other brand)
     customVehicleModelKey: 'Other / Custom (enter capacity below)',
   };
