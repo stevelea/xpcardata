@@ -62,6 +62,32 @@ void main() {
     });
   });
 
+  group('speed sentinels', () {
+    test('rejects the 255 km/h sentinel seen on a parked car', () {
+      expect(SensorSanity.isPlausibleSpeed(255), isFalse);
+      expect(SensorSanity.sanitizeSpeed(255), isNull);
+    });
+
+    test('rejects 0xFFFF-derived sentinels', () {
+      expect(SensorSanity.isPlausibleSpeed(655.35), isFalse);
+      expect(SensorSanity.isPlausibleSpeed(65535), isFalse);
+    });
+
+    test('accepts real speeds', () {
+      expect(SensorSanity.isPlausibleSpeed(0), isTrue);
+      expect(SensorSanity.isPlausibleSpeed(49.5), isTrue);
+      expect(SensorSanity.isPlausibleSpeed(180), isTrue);
+      expect(SensorSanity.sanitizeSpeed(112), 112);
+    });
+
+    test('rejects negative, too fast and non-finite speeds', () {
+      expect(SensorSanity.isPlausibleSpeed(-1), isFalse);
+      expect(SensorSanity.isPlausibleSpeed(251), isFalse);
+      expect(SensorSanity.isPlausibleSpeed(double.nan), isFalse);
+      expect(SensorSanity.sanitizeSpeed(null), isNull);
+    });
+  });
+
   group('power calculation', () {
     test('computes kW from plausible values', () {
       expect(SensorSanity.computePowerKw(389.5, -12.3)!, closeTo(-4.79, 0.01));

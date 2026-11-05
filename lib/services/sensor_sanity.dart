@@ -71,6 +71,36 @@ class SensorSanity {
     return value.isFinite && value.abs() <= maxPlausibleDcCurrent;
   }
 
+  /// Fastest production EV is ~200 km/h; 250 is a generous ceiling.
+  static const double maxPlausibleSpeedKmh = 250.0;
+
+  /// CAN "signal not available" sentinels seen for 1-byte and 2-byte PIDs.
+  static const double _speedSentinelByte = 255.0; // 0xFF
+  static const double _speedSentinelWord = 655.35; // 0xFFFF / 100
+  static const double _speedSentinelWordRaw = 65535.0;
+
+  /// True for a speed that a car standing still or driving can actually show.
+  ///
+  /// A parked G6 reported 255 km/h, which is the 0xFF "not available" sentinel
+  /// being decoded as a number (0xFF with a single-byte formula, or 0xFFFF with
+  /// a /100 formula). Those values are rejected instead of shown.
+  static bool isPlausibleSpeed(double value) {
+    if (!value.isFinite) return false;
+    if (value < 0 || value > maxPlausibleSpeedKmh) return false;
+    if (value == _speedSentinelByte ||
+        value == _speedSentinelWord ||
+        value == _speedSentinelWordRaw) {
+      return false;
+    }
+    return true;
+  }
+
+  /// Returns the speed when plausible, otherwise null (rendered as "—").
+  static double? sanitizeSpeed(double? value) {
+    if (value == null) return null;
+    return isPlausibleSpeed(value) ? value : null;
+  }
+
   /// Power in kW from pack voltage/current, or null when either is implausible.
   static double? computePowerKw(double? packVoltage, double? packCurrent) {
     if (packVoltage == null || packCurrent == null) return null;

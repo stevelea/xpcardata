@@ -2,7 +2,7 @@
 
 Android Flutter app that reads an EV over OBD-II (ELM327 / WiCAN) and publishes
 to MQTT / Home Assistant, ABRP, Firebase fleet stats — plus a built-in web UI for
-remote viewing. Currently **v1.4.27**.
+remote viewing. Currently **v1.4.28**.
 
 ## Layout
 
@@ -14,7 +14,7 @@ carsoc/                    <- Flutter app (this repo root)
   lib/screens/             UI (home dashboard, live data, charging history, settings/*)
   lib/services/            OBD, MQTT, ABRP, charging sessions, web server, updater
   assets/web/              embedded web UI served by WebServerService
-  test/                    77 unit + integration tests (flutter_test)
+  test/                    89 unit + integration tests (flutter_test)
   android/                 Kotlin shell (MainActivity channels), Gradle config
   docs/                    release notes, user guide, PID refs, API docs
 ```
@@ -41,7 +41,7 @@ PATH=/tmp/shims:$PATH GRADLE_OPTS="-Duser.home=$PWD/.home" \
   ./.flutter_sdk/bin/flutter build apk --debug
 
 ./.flutter_sdk/bin/flutter analyze          # baseline ~146 issues, 0 errors
-./.flutter_sdk/bin/flutter test             # 77 tests, all pass
+./.flutter_sdk/bin/flutter test             # 89 tests, all pass
 ```
 
 ## Gotchas

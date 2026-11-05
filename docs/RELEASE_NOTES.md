@@ -1,5 +1,33 @@
 # XPCarData Release Notes
 
+## Version 1.4.28 - 2026-11-05
+
+### Remote-access settings now survive a restart
+On devices where the SharedPreferences channel cannot be opened (AI boxes) and
+Hive has no writable path either, the web server's enabled state, port and token
+were only held in memory — the server had to be re-enabled after every restart.
+
+- New `SimpleJsonStore` writes `app_settings.json` into the app data directory
+  (the same fallback path the charging history already uses).
+- Web server settings are written to every store that answers (SharedPreferences,
+  Hive, file) and read file-first on startup, so the server comes back up enabled.
+
+### Impossible speed values are rejected
+A parked G6 showed **255 km/h** — the CAN "signal not available" sentinel (0xFF)
+decoded as a number.
+
+- `SensorSanity.isPlausibleSpeed` rejects 255, 655.35, 65535, negatives, NaN and
+  anything above 250 km/h.
+- The check runs centrally in `DataSourceManager._sanitizeData`, so OBD, CarInfo
+  and proxy sources are all covered; the UI/MQTT/web view show "—" instead.
+- Latent bug fixed on the way: `VehicleData.copyWith(stateOfCharge: null)` never
+  actually cleared a value (null means "keep existing"). Added explicit
+  `clearStateOfCharge` / `clearSpeed` flags, so bad SOC is now really discarded.
+
+Tests: 89.
+
+---
+
 ## Version 1.4.27 - 2026-11-05
 
 ### Remote-view settings page matches the app

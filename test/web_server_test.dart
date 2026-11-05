@@ -4,7 +4,10 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'dart:io';
+
 import 'package:carsoc/services/settings_reader.dart';
+import 'package:carsoc/services/simple_json_store.dart';
 import 'package:carsoc/services/web_server_service.dart';
 
 /// Integration tests for the embedded remote-view HTTP server: static UI
@@ -170,6 +173,43 @@ void main() {
       expect(status, 200);
       final json = jsonDecode(body) as Map<String, dynamic>;
       expect(json['enabled'], isFalse);
+    });
+  });
+
+  group('persistence on devices without plugin stores', () {
+    test('saves and reloads the remote-access settings from the JSON file', () async {
+      final tempDir = await Directory.systemTemp.createTemp('xpcd_web_settings');
+      addTearDown(() async {
+        if (await tempDir.exists()) await tempDir.delete(recursive: true);
+      });
+
+      final store = SimpleJsonStore(
+        directoryResolver: () async => tempDir.path,
+      );
+
+      await service.stop();
+      service.fileStoreOverride = store;
+      service.assetLoaderOverride = (path) async => 'ok';
+      service.snapshotOverride = () async => {};
+
+      // No SharedPreferences/Hive in the test VM: only the file can persist.
+      await service.setToken('local-token');
+      await service.setPort(0);
+      await service.setEnabled(true);
+      addTearDown(() async {
+        await service.setEnabled(false);
+        await service.setToken('');
+        service.fileStoreOverride = null;
+      });
+
+      final saved = await store.load();
+      expect(saved['webServerEnabled'], isTrue);
+      expect(saved['webServerToken'], 'local-token');
+      expect(saved['webServerPort'], isNotNull);
+
+      // A fresh service instance would read these back on startup.
+      service.fileStoreOverride = null;
+      expect(await store.load(), isNotEmpty);
     });
   });
 

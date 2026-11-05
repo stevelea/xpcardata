@@ -15,6 +15,7 @@ import 'obd_proxy_service.dart';
 import 'tailscale_service.dart';
 import 'hive_storage_service.dart';
 import 'settings_reader.dart';
+import 'simple_json_store.dart';
 
 typedef WebAssetLoader = Future<String> Function(String assetPath);
 typedef WebSnapshotProvider = Future<Map<String, dynamic>> Function();
@@ -75,6 +76,7 @@ class WebServerService {
   WebSettingsProvider? settingsOverride;
   WebFleetProvider? fleetOverride;
   SettingsReader? settingsReaderOverride;
+  SimpleJsonStore? fileStoreOverride;
 
   bool get isRunning => _server != null;
   bool get isEnabled => _enabled;
@@ -111,7 +113,26 @@ class WebServerService {
     );
   }
 
+  /// Load persisted remote-access settings.
+  ///
+  /// Order of truth: the JSON file (written on every change, works everywhere),
+  /// then SharedPreferences, then Hive, then defaults. On AI boxes the prefs and
+  /// Hive channels fail outright, which is why the file is authoritative.
   Future<void> _loadSettings() async {
+    final file = await _settingsFile();
+    if (file != null) {
+      final values = await file.load();
+      if (values.containsKey(_prefEnabled) ||
+          values.containsKey(_prefPort) ||
+          values.containsKey(_prefToken)) {
+        _enabled = values[_prefEnabled] as bool? ?? false;
+        _port = (values[_prefPort] as num?)?.toInt() ?? defaultPort;
+        _token = values[_prefToken] as String? ?? '';
+        _logger.log('[WebServer] Settings loaded from $fileName (port=$_port, enabled=$_enabled)');
+        return;
+      }
+    }
+
     try {
       final prefs = await SharedPreferences.getInstance();
       _enabled = prefs.getBool(_prefEnabled) ?? false;
@@ -122,8 +143,6 @@ class WebServerService {
       _logger.log('[WebServer] SharedPreferences unavailable, trying Hive: $e');
     }
 
-    // AI boxes and some devices cannot open the SharedPreferences channel at
-    // all (PlatformException channel-error). Hive is the app's fallback store.
     try {
       final hive = HiveStorageService.instance;
       if (hive.isAvailable) {
@@ -143,29 +162,63 @@ class WebServerService {
     _token = '';
   }
 
+  static const String fileName = 'app_settings.json';
+
+  Future<SimpleJsonStore?> _settingsFile() async {
+    final override = fileStoreOverride;
+    if (override != null) return override;
+    try {
+      return SimpleJsonStore(fileName: fileName);
+    } catch (e) {
+      _logger.log('[WebServer] Settings file store unavailable: $e');
+      return null;
+    }
+  }
+
+  /// Persist to every store that answers. The JSON file is written last and is
+  /// what survives on devices where the plugin channels are broken.
   Future<void> _persistSettings() async {
+    final values = <String, Object?>{
+      _prefEnabled: _enabled,
+      _prefPort: _port,
+      _prefToken: _token,
+    };
+
+    var persisted = false;
+
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_prefEnabled, _enabled);
       await prefs.setInt(_prefPort, _port);
       await prefs.setString(_prefToken, _token);
-      return;
+      persisted = true;
     } catch (e) {
-      _logger.log('[WebServer] Could not persist to SharedPreferences, trying Hive: $e');
+      _logger.log('[WebServer] Could not persist to SharedPreferences: $e');
     }
 
     try {
       final hive = HiveStorageService.instance;
-      if (!hive.isAvailable) {
-        _logger.log('[WebServer] No persistent store; web server settings are session-only');
-        return;
+      if (hive.isAvailable) {
+        await hive.saveSetting(_prefEnabled, _enabled);
+        await hive.saveSetting(_prefPort, _port);
+        await hive.saveSetting(_prefToken, _token);
+        persisted = true;
       }
-      await hive.saveSetting(_prefEnabled, _enabled);
-      await hive.saveSetting(_prefPort, _port);
-      await hive.saveSetting(_prefToken, _token);
-      _logger.log('[WebServer] Settings saved to Hive');
     } catch (e) {
-      _logger.log('[WebServer] Could not persist settings: $e');
+      _logger.log('[WebServer] Could not persist to Hive: $e');
+    }
+
+    final file = await _settingsFile();
+    if (file != null) {
+      final ok = await file.save(values);
+      if (ok) {
+        persisted = true;
+        _logger.log('[WebServer] Settings saved to $fileName');
+      }
+    }
+
+    if (!persisted) {
+      _logger.log('[WebServer] No persistent store available; web server settings are session-only');
     }
   }
 

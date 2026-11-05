@@ -4,7 +4,7 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![Flutter](https://img.shields.io/badge/Flutter-3.x-blue)
-![Version](https://img.shields.io/badge/version-1.4.27-orange)
+![Version](https://img.shields.io/badge/version-1.4.28-orange)
 
 ## Screenshots
 
@@ -63,10 +63,10 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 ### Download
 Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcardata/releases).
 
-**Current Version:** v1.4.27
+**Current Version:** v1.4.28
 
-1. Download `XPCarData-v1.4.27.zip` from the [latest release](https://github.com/stevelea/xpcardata/releases/latest)
-2. Extract the ZIP file to get `XPCarData-v1.4.27.apk`
+1. Download `XPCarData-v1.4.28.zip` from the [latest release](https://github.com/stevelea/xpcardata/releases/latest)
+2. Extract the ZIP file to get `XPCarData-v1.4.28.apk`
 3. Install the APK on your Android device (enable "Install from unknown sources" if prompted)
 
 ### Requirements
@@ -160,7 +160,11 @@ Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcard
 
 ## Version History
 
-### v1.4.27 (Current)
+### v1.4.28 (Current)
+- **Web server settings persist everywhere** - a JSON file (`app_settings.json` in the app data dir) is now the durable store when SharedPreferences and Hive both fail, so the remote view comes back enabled after a restart with the same port/token.
+- **255 km/h sentinel rejected** - the CAN "not available" value is filtered centrally (`SensorSanity.isPlausibleSpeed`), covering OBD/CarInfo/proxy; the dashboard shows "—". Also fixed `copyWith(null)` never clearing SOC/speed.
+
+### v1.4.27
 - **Web settings page now matches the app** - the API read SharedPreferences only; the app reads Hive first (and prefs is unavailable on AI boxes), so the browser showed blanks/defaults. A shared `SettingsReader` fixes the ordering, and the page gained TLS, auto-reconnect, Tailscale, OBD proxy and BM300 sections. `settingsAvailable: false` now means "showing defaults".
 
 ### v1.4.26

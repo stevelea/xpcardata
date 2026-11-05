@@ -12,6 +12,7 @@ import 'mqtt_service.dart';
 import 'abrp_service.dart';
 import 'car_app_bridge.dart';
 import 'aux_battery_guard.dart';
+import 'sensor_sanity.dart';
 import 'charging_session_service.dart';
 import 'native_location_service.dart';
 import 'fleet_analytics_service.dart';
@@ -129,11 +130,24 @@ class DataSourceManager {
 
   /// Validate and sanitize vehicle data, nullifying out-of-range values
   VehicleData _sanitizeData(VehicleData data) {
-    if (data.stateOfCharge != null && data.stateOfCharge! > 100.0) {
-      _logger.log('[DataSourceManager] BAD DATA: SOC ${data.stateOfCharge}% > 100%, discarding value');
-      return data.copyWith(stateOfCharge: null);
+    var sanitized = data;
+
+    if (sanitized.stateOfCharge != null &&
+        (sanitized.stateOfCharge! > 100.0 || sanitized.stateOfCharge! < 0)) {
+      _logger.log('[DataSourceManager] BAD DATA: SOC ${sanitized.stateOfCharge}% out of range, discarding value');
+      sanitized = sanitized.copyWith(clearStateOfCharge: true);
     }
-    return data;
+
+    // A parked car reported 255 km/h: the CAN "not available" sentinel decoded
+    // as a number. Reject it here so no source (OBD, CarInfo, proxy) can put an
+    // impossible speed into the UI, MQTT or the web view.
+    final speed = sanitized.speed;
+    if (speed != null && !SensorSanity.isPlausibleSpeed(speed)) {
+      _logger.log('[DataSourceManager] BAD DATA: speed ${speed.toStringAsFixed(1)} km/h is implausible, discarding value');
+      sanitized = sanitized.copyWith(clearSpeed: true);
+    }
+
+    return sanitized;
   }
 
   /// Stream of vehicle data from current active source
