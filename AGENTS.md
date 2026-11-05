@@ -65,8 +65,12 @@ PATH=/tmp/shims:$PATH GRADLE_OPTS="-Duser.home=$PWD/.home" \
 6. **AI boxes** (Carlinkit/Ottocast) break sqflite, SharedPreferences,
    path_provider and external storage — persistence has fallbacks (Hive → prefs →
    in-memory). Never assume a settings write succeeded; wrap and log.
-7. **Git remote is HTTPS** (`https://github.com/stevelea/xpcardata.git`), not SSH
-   as some older docs say. Pushing needs credentials; fetching works anonymously.
+7. **Git remote is SSH** (`git@github.com:stevelea/xpcardata.git`) and pushes
+   work with the local key. `gh` API calls (releases/issues) fail because its
+   token is invalid and cannot reach the keychain from the sandbox — use git for
+   publishing and hand `gh` steps to the user. Always `git fetch` +
+   `git pull --rebase origin main` before pushing (others push to `main`), never
+   force-push, never move an existing tag.
 8. **PID parsing has two layouts**: built-in profiles index `B4`-style after the
    CAN ID/ISO-TP strip (`OBDPIDConfig.parseWithFormula`); WiCAN community profiles
    index against WiCAN's own buffer (`WiCanResponseParser`, keep framing/sequence
