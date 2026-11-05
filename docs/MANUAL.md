@@ -1,6 +1,6 @@
 # XPCarData User Manual
 
-**Version 1.3.87** | Battery Monitor for XPENG Electric Vehicles
+**Version 1.4.25** | Battery Monitor for XPENG Electric Vehicles
 
 ---
 

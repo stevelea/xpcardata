@@ -547,12 +547,13 @@
    * ================================================================== */
 
   function kv(label, value, unit) {
+    var missing = value === null || value === undefined || value === '' || value === DASH;
     return (
       '<div class="kv-row"><dt>' +
       esc(label) +
       '</dt><dd>' +
-      (value === null || value === undefined || value === '' ? DASH : value) +
-      (unit ? '<span class="unit">' + esc(unit) + '</span>' : '') +
+      (missing ? DASH : value) +
+      (!missing && unit ? '<span class="unit">' + esc(unit) + '</span>' : '') +
       '</dd></div>'
     );
   }

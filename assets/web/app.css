@@ -1593,6 +1593,7 @@ main {
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .manual-table tr:last-child td {
@@ -1675,6 +1676,20 @@ main {
 
   .dist-row {
     grid-template-columns: minmax(42px, 64px) minmax(0, 1fr) auto;
+  }
+
+  .manual-table {
+    font-size: 12px;
+  }
+
+  .manual-table th {
+    font-size: 9.5px;
+    letter-spacing: 0.02em;
+  }
+
+  .manual-table th,
+  .manual-table td {
+    padding: 6px 8px;
   }
 
   .hero {
