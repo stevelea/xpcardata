@@ -8,6 +8,9 @@
  *   GET /api/state        — server info + latest vehicle frame (polled 2 s)
  *   GET /api/sessions     — charging sessions (polled only on #/charging)
  *   GET /api/logs         — debug log tail (polled only on #/logs)
+ *   GET /api/settings     — redacted app settings (polled 10 s on #/settings)
+ *   GET /api/fleet        — anonymous fleet aggregates (once per #/settings open)
+ *   GET /api/manual       — bundled markdown manual (loaded on #/manual)
  *
  * Authentication: when the server has a token configured it answers 401 with
  * {"error":"unauthorized","authRequired":true}. The token captured from the
@@ -25,15 +28,18 @@
   var POLL_STATE_MS = 2000;
   var POLL_SESSIONS_MS = 5000;
   var POLL_LOGS_MS = 3000;
+  var POLL_SETTINGS_MS = 10000;
   var HISTORY_MAX = 120;
   var AUTH_MUTE_MS = 60000;
   var DASH = '\u2014';
-  var PAGES = ['dashboard', 'live', 'charging', 'logs', 'about'];
+  var PAGES = ['dashboard', 'live', 'charging', 'logs', 'settings', 'manual', 'about'];
   var PAGE_TITLES = {
     dashboard: 'Dashboard',
     live: 'Live data',
     charging: 'Charging',
     logs: 'Logs',
+    settings: 'Settings',
+    manual: 'Manual',
     about: 'About'
   };
   var SOURCE_LABELS = {
@@ -42,6 +48,25 @@
     mock: 'Mock data',
     proxy: 'OBD proxy',
     none: 'No source'
+  };
+  var MODEL_LABELS = {
+    G6: 'G6',
+    G6_24LR: 'G6 2024 LR/AWD',
+    G6_24SR: 'G6 2024 SR',
+    G6_25LR: 'G6 2025 LR/AWD',
+    G6_25SR: 'G6 2025 SR',
+    G9_LR_AWD: 'G9 LR/AWD',
+    G9_LR_RWD: 'G9 LR/RWD',
+    G9_SR_RWD: 'G9 SR/RWD',
+    P7_LR_RWD: 'P7 LR/RWD',
+    G3i_SR_RWD: 'G3i SR/RWD',
+    CUSTOM: 'Custom'
+  };
+  var LEGACY_MODEL_LABELS = {
+    '24LR': 'G6 2024 LR/AWD',
+    '24SR': 'G6 2024 SR',
+    '25LR': 'G6 2025 LR/AWD',
+    '25SR': 'G6 2025 SR'
   };
   var VOLTAGE_RE = /(voltage|(^|_)v($|_))/i;
 
@@ -55,7 +80,14 @@
     pedal: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 19 19 5"/><path d="M5 9V5h4"/><path d="M19 15v4h-4"/></svg>',
     activity: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>',
     gps: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 21s6-5.2 6-10a6 6 0 1 0-12 0c0 4.8 6 10 6 10z"/><circle cx="12" cy="11" r="2.5"/></svg>',
-    car: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 16h16l-1.5-5.5a2 2 0 0 0-2-1.5H7.5a2 2 0 0 0-2 1.5z"/><circle cx="7.5" cy="18" r="1.5"/><circle cx="16.5" cy="18" r="1.5"/></svg>'
+    car: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 16h16l-1.5-5.5a2 2 0 0 0-2-1.5H7.5a2 2 0 0 0-2 1.5z"/><circle cx="7.5" cy="18" r="1.5"/><circle cx="16.5" cy="18" r="1.5"/></svg>',
+    settings: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.5"/><circle cx="15" cy="17" r="2.5"/></svg>',
+    book: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5.5C10.5 4.5 8.5 4 6 4H4v14h2c2.5 0 4.5.5 6 1.5M12 5.5C13.5 4.5 15.5 4 18 4h2v14h-2c-2.5 0-4.5.5-6 1.5M12 5.5v14"/></svg>',
+    cloud: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.5 18h9a4 4 0 0 0 .6-8 6 6 0 0 0-11.4 1.3A3.5 3.5 0 0 0 7.5 18z"/></svg>',
+    shield: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 5.5 5.7v5.6c0 4.2 3 7.5 6.5 8.7 3.5-1.2 6.5-4.5 6.5-8.7V5.7z"/><path d="m9.5 11.5 1.8 1.8 3.4-3.6"/></svg>',
+    wifi: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 9a13 13 0 0 1 17 0M6.5 12.5a8.5 8.5 0 0 1 11 0M9.8 16a4.5 4.5 0 0 1 4.4 0"/><circle cx="12" cy="19" r="1"/></svg>',
+    route: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 19h6a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h10"/><circle cx="4" cy="19" r="1.6"/><circle cx="20" cy="7" r="1.6"/></svg>',
+    globe: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M3.5 12h17M12 3.5c2.5 2.4 2.5 14.6 0 17M12 3.5c-2.5 2.4-2.5 14.6 0 17"/></svg>'
   };
 
   /* ================================================================== *
@@ -263,11 +295,19 @@
     autoScroll: true,
     liveFilter: '',
     liveSort: { field: 'key', dir: 1 },
-    logFilter: ''
+    logFilter: '',
+    settings: null,
+    settingsError: null,
+    fleet: null,
+    fleetError: null,
+    fleetLoaded: false,
+    manual: null,
+    manualError: null,
+    manualRev: 0
   };
 
-  var inflight = { state: false, sessions: false, logs: false };
-  var timers = { state: null, sessions: null, logs: null, tick: null };
+  var inflight = { state: false, sessions: false, logs: false, settings: false, fleet: false, manual: false };
+  var timers = { state: null, sessions: null, logs: null, settings: null, tick: null };
   var lastFocusedElement = null;
   var toastTimer = null;
 
@@ -1224,6 +1264,477 @@
   }
 
   /* ================================================================== *
+   * Render: settings (read-only), fleet, manual
+   * ================================================================== */
+
+  function modelLabel(code) {
+    if (typeof code !== 'string' || !code) return 'Unknown model';
+    if (MODEL_LABELS[code]) return MODEL_LABELS[code];
+    if (LEGACY_MODEL_LABELS[code]) return LEGACY_MODEL_LABELS[code];
+    var parts = code.split('_');
+    var model = parts[0];
+    var rest = parts.slice(1);
+    var year = null;
+    if (rest.length && /^\d{2}$/.test(rest[0])) {
+      year = '20' + rest[0];
+      rest = rest.slice(1);
+    }
+    var tail = rest.join('/');
+    return (model + (year ? ' ' + year : '') + (tail ? ' ' + tail : '')).trim();
+  }
+
+  function onOff(value) {
+    if (value === true) return '<span class="state is-on">On</span>';
+    if (value === false) return '<span class="state is-off">Off</span>';
+    return DASH;
+  }
+
+  function configuredChip(value) {
+    if (value === true) return '<span class="badge is-active">Configured</span>';
+    if (value === false) return '<span class="badge">Not configured</span>';
+    return DASH;
+  }
+
+  function requiredChip(value) {
+    if (value === true) return '<span class="badge is-warn">Required</span>';
+    if (value === false) return '<span class="badge">Not required</span>';
+    return DASH;
+  }
+
+  function settingsVehicleCard(vehicle) {
+    var v = vehicle && typeof vehicle === 'object' ? vehicle : {};
+    var code = typeof v.model === 'string' && v.model ? v.model : null;
+    var label = code ? modelLabel(code) : null;
+    var modelValue = label
+      ? esc(label) + (label !== code ? ' <span class="muted">(' + esc(code) + ')</span>' : '')
+      : DASH;
+    var rows = kv('Model', modelValue);
+    var custom = num(v.customCapacityKwh);
+    if (code === 'CUSTOM' && custom !== null) {
+      rows += kv('Custom capacity', fmt(custom), 'kWh');
+    }
+    return card('Vehicle', kvList(rows), ICON.car);
+  }
+
+  function settingsBehaviourCard(behavior) {
+    var b = behavior && typeof behavior === 'object' ? behavior : {};
+    return card(
+      'App behaviour',
+      kvList(
+        kv('Update frequency', fmt0(b.updateFrequencySeconds), 's') +
+          kv('Start minimised', onOff(b.startMinimised)) +
+          kv('Stay in background', onOff(b.stayInBackground)) +
+          kv('Keep-alive service', onOff(b.keepAliveEnabled)) +
+          kv('Background service', onOff(b.backgroundServiceEnabled)) +
+          kv('Automatic update check', onOff(b.autoUpdateCheck)) +
+          kv('Location access', onOff(b.locationEnabled))
+      ),
+      ICON.settings
+    );
+  }
+
+  function settingsAlertsCard(alerts) {
+    var a = alerts && typeof alerts === 'object' ? alerts : {};
+    return card(
+      'Alerts & protection',
+      kvList(
+        kv('Low battery alert', fmt(a.lowBatteryPercent), '%') +
+          kv('Critical battery alert', fmt(a.criticalBatteryPercent), '%') +
+          kv('High temperature alert', fmt(a.highTemperatureCelsius), '\u00b0C') +
+          kv('12V aux protection', onOff(a.auxBatteryProtection)) +
+          kv('12V aux threshold', fmtV(a.auxBatteryThresholdVolts), 'V')
+      ),
+      ICON.shield
+    );
+  }
+
+  function settingsMqttCard(mqtt) {
+    var m = mqtt && typeof mqtt === 'object' ? mqtt : {};
+    return card(
+      'MQTT / Home Assistant',
+      kvList(
+        kv('Publishing', onOff(m.enabled)) +
+          kv('Broker', typeof m.broker === 'string' && m.broker ? esc(m.broker) : DASH) +
+          kv('Port', fmt0(m.port)) +
+          kv('Username', typeof m.username === 'string' && m.username ? esc(m.username) : DASH) +
+          kv('Password', configuredChip(m.passwordSet)) +
+          kv('TLS', onOff(m.tls)) +
+          kv('Vehicle ID', typeof m.vehicleId === 'string' && m.vehicleId ? esc(m.vehicleId) : DASH) +
+          kv('HA discovery', onOff(m.homeAssistantDiscovery))
+      ),
+      ICON.wifi
+    );
+  }
+
+  function settingsAbrpCard(abrp) {
+    var a = abrp && typeof abrp === 'object' ? abrp : {};
+    return card(
+      'ABRP',
+      kvList(
+        kv('Telemetry', onOff(a.enabled)) +
+          kv('Token', configuredChip(a.tokenConfigured))
+      ),
+      ICON.route
+    );
+  }
+
+  function settingsRemoteCard(remote) {
+    var r = remote && typeof remote === 'object' ? remote : {};
+    return card(
+      'Remote access',
+      kvList(
+        kv('Web server', onOff(r.enabled)) +
+          kv('Running', onOff(r.running)) +
+          kv('Port', fmt0(r.port)) +
+          kv('Token required', requiredChip(r.tokenRequired))
+      ),
+      ICON.globe
+    );
+  }
+
+  function distributionBars(distribution) {
+    if (!distribution || typeof distribution !== 'object' || Array.isArray(distribution)) return '';
+    var entries = [];
+    Object.keys(distribution).forEach(function (key) {
+      if (isNum(distribution[key])) entries.push([key, distribution[key]]);
+    });
+    if (!entries.length) return '';
+    entries.sort(function (a, b) {
+      return b[1] - a[1];
+    });
+    var max = entries[0][1] || 1;
+    return (
+      '<div class="dist">' +
+      entries
+        .map(function (entry) {
+          var width = Math.max(2, Math.round((entry[1] / max) * 100));
+          return (
+            '<div class="dist-row"><span class="dist-label">' + esc(entry[0]) + '</span>' +
+            '<span class="dist-bar"><span style="width:' + width + '%"></span></span>' +
+            '<span class="dist-value">' + fmtG(entry[1], 0) + '</span></div>'
+          );
+        })
+        .join('') +
+      '</div>'
+    );
+  }
+
+  function countryList(distribution) {
+    if (!distribution || typeof distribution !== 'object' || Array.isArray(distribution)) return '';
+    var entries = [];
+    Object.keys(distribution).forEach(function (key) {
+      if (isNum(distribution[key])) entries.push([key, distribution[key]]);
+    });
+    if (!entries.length) return '';
+    entries.sort(function (a, b) {
+      return b[1] - a[1];
+    });
+    return (
+      '<ul class="country-list">' +
+      entries
+        .map(function (entry) {
+          return '<li><span>' + esc(entry[0]) + '</span><b>' + fmtG(entry[1], 0) + '</b></li>';
+        })
+        .join('') +
+      '</ul>'
+    );
+  }
+
+  function settingsFleetCard() {
+    var fleet = state.fleet;
+    if (!fleet || typeof fleet !== 'object') {
+      var message = state.fleetError
+        ? 'Fleet statistics unavailable (' + esc(errText(state.fleetError)) + ').'
+        : 'Loading fleet statistics…';
+      return card('Fleet statistics', '<p class="hint">' + message + '</p>', ICON.cloud);
+    }
+    if (fleet.enabled !== true) {
+      return card(
+        'Fleet statistics',
+        '<p class="hint">Fleet statistics off (opt-in in the app).</p>',
+        ICON.cloud,
+        'off'
+      );
+    }
+    var stats = fleet.stats && typeof fleet.stats === 'object' ? fleet.stats : null;
+    if (!stats) {
+      return card(
+        'Fleet statistics',
+        '<p class="hint">Waiting for fleet data…</p>',
+        ICON.cloud,
+        'opted in'
+      );
+    }
+
+    var body = kvList(
+      kv('Contributors', fmtG(num(stats.totalContributors), 0)) +
+        kv('Contributions', fmtG(num(stats.totalContributions), 0)) +
+        kv('Average SOH', fmt(num(stats.avgSoh)), '%') +
+        kv('Average AC power', fmt(num(stats.avgChargingPowerAc)), 'kW') +
+        kv('Average DC power', fmt(num(stats.avgChargingPowerDc)), 'kW') +
+        (parseTime(stats.lastUpdated) !== null ? kv('Updated', esc(fmtDateTime(stats.lastUpdated))) : '')
+    );
+
+    var sohBars = distributionBars(stats.sohDistribution);
+    if (sohBars) body += '<p class="hint">SOH distribution</p>' + sohBars;
+    var typeBars = distributionBars(stats.chargingTypeDistribution);
+    if (typeBars) body += '<p class="hint">Charging type distribution</p>' + typeBars;
+    var countries = countryList(stats.countryDistribution);
+    if (countries) body += '<p class="hint">Contributors by country</p>' + countries;
+
+    return card('Fleet statistics', body, ICON.cloud, 'anonymous');
+  }
+
+  function settingsManualCard() {
+    return card(
+      'Manual',
+      '<p class="hint">The full user manual is bundled with the app and rendered read-only from <code>/api/manual</code>.</p>' +
+        '<p class="hint"><a class="btn" href="#/manual">Open the manual</a></p>',
+      ICON.book
+    );
+  }
+
+  function renderSettings() {
+    var grid = $('#settings-cards');
+    if (!grid) return;
+    var settings = state.settings;
+
+    /* Re-render only when the payload actually changed, so the 2 s state poll
+       does not rebuild these cards while the user is reading them. */
+    var signature = JSON.stringify([
+      settings,
+      state.fleet,
+      state.settingsError ? errText(state.settingsError) : '',
+      state.fleetError ? errText(state.fleetError) : ''
+    ]);
+    if (grid.getAttribute('data-sig') === signature) return;
+    grid.setAttribute('data-sig', signature);
+
+    var cards = [];
+
+    if (settings && typeof settings === 'object') {
+      cards.push(settingsVehicleCard(settings.vehicle));
+      cards.push(settingsBehaviourCard(settings.behavior));
+      cards.push(settingsAlertsCard(settings.alerts));
+      cards.push(settingsMqttCard(settings.mqtt));
+      cards.push(settingsAbrpCard(settings.abrp));
+      cards.push(settingsRemoteCard(settings.remoteAccess));
+    } else {
+      var message = state.settingsError
+        ? 'Settings unavailable (' + esc(errText(state.settingsError)) + ').'
+        : 'Waiting for settings…';
+      cards.push(card('Settings', '<p class="hint">' + message + '</p>', ICON.settings));
+    }
+
+    cards.push(settingsFleetCard());
+    cards.push(settingsManualCard());
+    grid.innerHTML = cards.join('');
+
+    var version = $('#settings-app-version');
+    if (version) {
+      var app = settings && settings.app && typeof settings.app === 'object' ? settings.app : null;
+      version.textContent =
+        app && typeof app.version === 'string' && app.version ? 'App v' + app.version : 'App v' + DASH;
+    }
+  }
+
+  /* Minimal, safe markdown renderer for /api/manual. Everything is escaped
+     before any markup is added; links are restricted to http(s)/mailto and
+     opened with noopener. Internal (#anchor) links are rendered as plain text
+     so they cannot hijack the hash router. */
+  function renderMarkdown(markdown) {
+    if (typeof markdown !== 'string' || !markdown.trim()) {
+      return '<p class="hint">The manual is empty.</p>';
+    }
+
+    var lines = markdown.replace(/\r\n?/g, '\n').split('\n');
+    var out = [];
+    var paragraph = [];
+    var listType = null;
+    var codeLines = null;
+
+    function inline(text) {
+      var safe = esc(text);
+      safe = safe.replace(
+        /\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g,
+        function (match, label, url) {
+          return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + label + '</a>';
+        }
+      );
+      safe = safe.replace(/\[([^\]]+)\]\(#[^)]+\)/g, '$1');
+      safe = safe.replace(/`([^`]+)`/g, '<code>$1</code>');
+      safe = safe.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      safe = safe.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+      return safe;
+    }
+
+    function closeParagraph() {
+      if (!paragraph.length) return;
+      out.push('<p>' + inline(paragraph.join('\n')).replace(/\n/g, '<br>') + '</p>');
+      paragraph = [];
+    }
+
+    function closeList() {
+      if (!listType) return;
+      out.push('</' + listType + '>');
+      listType = null;
+    }
+
+    function isTableRow(text) {
+      return /^\s*\|.*\|\s*$/.test(text);
+    }
+
+    function tableCells(row) {
+      var trimmed = row.trim();
+      if (trimmed.charAt(0) === '|') trimmed = trimmed.slice(1);
+      if (trimmed.charAt(trimmed.length - 1) === '|') trimmed = trimmed.slice(0, -1);
+      return trimmed.split('|').map(function (cell) {
+        return cell.trim();
+      });
+    }
+
+    function isSeparatorRow(cells) {
+      if (!cells.length) return false;
+      return cells.every(function (cell) {
+        return /^:?-{2,}:?$/.test(cell);
+      });
+    }
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+
+      if (codeLines !== null) {
+        if (/^```/.test(line)) {
+          out.push('<pre><code>' + esc(codeLines.join('\n')) + '</code></pre>');
+          codeLines = null;
+        } else {
+          codeLines.push(line);
+        }
+        continue;
+      }
+
+      if (/^```/.test(line)) {
+        closeParagraph();
+        closeList();
+        codeLines = [];
+        continue;
+      }
+
+      if (!line.trim()) {
+        closeParagraph();
+        closeList();
+        continue;
+      }
+
+      var heading = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+      if (heading) {
+        closeParagraph();
+        closeList();
+        var level = heading[1].length === 1 ? 2 : Math.min(5, heading[1].length + 1);
+        out.push('<h' + level + '>' + inline(heading[2]) + '</h' + level + '>');
+        continue;
+      }
+
+      if (/^(\*\s*){3,}$/.test(line) || /^(-\s*){3,}$/.test(line) || /^(_\s*){3,}$/.test(line)) {
+        closeParagraph();
+        closeList();
+        out.push('<hr>');
+        continue;
+      }
+
+      var quote = /^>\s?(.*)$/.exec(line);
+      if (quote) {
+        closeParagraph();
+        closeList();
+        out.push('<blockquote>' + inline(quote[1]) + '</blockquote>');
+        continue;
+      }
+
+      if (isTableRow(line)) {
+        closeParagraph();
+        closeList();
+        var tableRows = [];
+        var next = i;
+        while (next < lines.length && isTableRow(lines[next])) {
+          tableRows.push(lines[next]);
+          next += 1;
+        }
+        var tableHtml = '<div class="manual-table-wrap"><table class="manual-table">';
+        var bodyRowIndex = 0;
+        for (var r = 0; r < tableRows.length; r++) {
+          var cells = tableCells(tableRows[r]);
+          if (isSeparatorRow(cells)) continue;
+          var tag = bodyRowIndex === 0 ? 'th' : 'td';
+          tableHtml +=
+            '<tr>' +
+            cells
+              .map(function (cell, cellIndex) {
+                var cellTag = tag;
+                return '<' + cellTag + '>' + inline(cell) + '</' + cellTag + '>';
+              })
+              .join('') +
+            '</tr>';
+          bodyRowIndex += 1;
+        }
+        tableHtml += '</table></div>';
+        out.push(tableHtml);
+        i = next - 1;
+        continue;
+      }
+
+      var bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
+      if (bullet) {
+        closeParagraph();
+        if (listType !== 'ul') {
+          closeList();
+          out.push('<ul>');
+          listType = 'ul';
+        }
+        out.push('<li>' + inline(bullet[1]) + '</li>');
+        continue;
+      }
+
+      var numbered = /^\s*(\d+)[.)]\s+(.*)$/.exec(line);
+      if (numbered) {
+        closeParagraph();
+        if (listType !== 'ol') {
+          closeList();
+          out.push('<ol>');
+          listType = 'ol';
+        }
+        out.push('<li value="' + numbered[1] + '">' + inline(numbered[2]) + '</li>');
+        continue;
+      }
+
+      closeList();
+      paragraph.push(line);
+    }
+
+    if (codeLines !== null) out.push('<pre><code>' + esc(codeLines.join('\n')) + '</code></pre>');
+    closeParagraph();
+    closeList();
+    return out.join('\n');
+  }
+
+  function renderManual() {
+    var body = $('#manual-body');
+    if (!body) return;
+    var revision = String(state.manualRev);
+    if (body.getAttribute('data-rev') === revision) return;
+
+    var html;
+    if (state.manual === null) {
+      html = state.manualError
+        ? '<p class="hint">Manual unavailable (' + esc(errText(state.manualError)) + ').</p>'
+        : '<p class="hint">Loading manual…</p>';
+    } else {
+      html = renderMarkdown(state.manual);
+    }
+    body.innerHTML = html;
+    body.setAttribute('data-rev', revision);
+  }
+
+  /* ================================================================== *
    * Router
    * ================================================================== */
 
@@ -1252,6 +1763,12 @@
       case 'logs':
         renderLogs();
         break;
+      case 'settings':
+        renderSettings();
+        break;
+      case 'manual':
+        renderManual();
+        break;
       case 'about':
         renderAbout();
         break;
@@ -1277,6 +1794,7 @@
     if (changed) {
       syncPolling();
       refreshForRoute();
+      if (state.route === 'settings') pollFleet();
     }
   }
 
@@ -1383,11 +1901,82 @@
       });
   }
 
+  function pollSettings() {
+    if (document.hidden || state.route !== 'settings' || authPollBlocked()) return;
+    if (inflight.settings) return;
+    inflight.settings = true;
+
+    api('/api/settings')
+      .then(function (payload) {
+        state.settings = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+        state.settingsError = null;
+        state.auth.denied = false;
+      })
+      .catch(function (error) {
+        state.settingsError = error;
+        handleApiFailure(error);
+      })
+      .then(function () {
+        inflight.settings = false;
+        if (state.route === 'settings') {
+          renderSettings();
+          renderStatus();
+        }
+      });
+  }
+
+  function pollFleet() {
+    if (document.hidden || state.route !== 'settings' || authPollBlocked()) return;
+    if (inflight.fleet) return;
+    inflight.fleet = true;
+
+    api('/api/fleet')
+      .then(function (payload) {
+        state.fleet = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+        state.fleetError = null;
+        state.fleetLoaded = true;
+        state.auth.denied = false;
+      })
+      .catch(function (error) {
+        state.fleet = null;
+        state.fleetError = error;
+        handleApiFailure(error);
+      })
+      .then(function () {
+        inflight.fleet = false;
+        if (state.route === 'settings') renderSettings();
+      });
+  }
+
+  function pollManual() {
+    if (document.hidden || state.route !== 'manual' || authPollBlocked()) return;
+    if (inflight.manual) return;
+    inflight.manual = true;
+
+    api('/api/manual')
+      .then(function (payload) {
+        state.manual = payload && typeof payload.manual === 'string' ? payload.manual : '';
+        state.manualError = null;
+        state.auth.denied = false;
+      })
+      .catch(function (error) {
+        state.manualError = error;
+        handleApiFailure(error);
+      })
+      .then(function () {
+        inflight.manual = false;
+        state.manualRev += 1;
+        if (state.route === 'manual') renderManual();
+      });
+  }
+
   function refreshForRoute() {
     if (document.hidden) return;
     pollState();
     if (state.route === 'charging') pollSessions();
     if (state.route === 'logs') pollLogs();
+    if (state.route === 'settings') pollSettings();
+    if (state.route === 'manual') pollManual();
   }
 
   function syncPolling() {
@@ -1401,6 +1990,9 @@
 
     if (visible && state.route === 'logs') startTimer('logs', pollLogs, POLL_LOGS_MS);
     else clearTimer('logs');
+
+    if (visible && state.route === 'settings') startTimer('settings', pollSettings, POLL_SETTINGS_MS);
+    else clearTimer('settings');
 
     if (visible) startTimer('tick', renderStatus, 1000);
     else clearTimer('tick');
@@ -1532,9 +2124,8 @@
         state.auth.mutedUntil = 0;
         renderStatus();
         renderAbout();
-        pollState();
-        if (state.route === 'charging') pollSessions();
-        if (state.route === 'logs') pollLogs();
+        refreshForRoute();
+        if (state.route === 'settings') pollFleet();
         toast('Token saved');
       });
     }
@@ -1577,7 +2168,7 @@
         renderAbout();
         renderStatus();
         toast('Token cleared');
-        if (!document.hidden) pollState();
+        if (!document.hidden) refreshForRoute();
       });
     }
   }
@@ -1606,6 +2197,7 @@
     showPage();
     syncPolling();
     refreshForRoute();
+    if (state.route === 'settings') pollFleet();
 
     window.addEventListener('hashchange', onRouteChange);
     document.addEventListener('visibilitychange', onVisibilityChange);

@@ -171,6 +171,24 @@ void main() {
     });
   });
 
+  group('default providers', () {
+    test('settingsSnapshot works without injected overrides', () async {
+      service.settingsOverride = null;
+      final snapshot = await service.settingsSnapshot();
+      expect(snapshot['vehicle'], isA<Map>());
+      expect(snapshot['mqtt'], isA<Map>());
+      expect(snapshot['remoteAccess']['running'], isTrue);
+      expect(snapshot['app']['version'], isNotEmpty);
+    });
+
+    test('fleetSnapshot never throws when analytics is unavailable', () async {
+      service.fleetOverride = null;
+      final snapshot = await service.fleetSnapshot();
+      expect(snapshot.containsKey('enabled'), isTrue);
+      expect(snapshot.containsKey('stats'), isTrue);
+    });
+  });
+
   group('token authentication', () {
     setUp(() async => service.setToken('secret-token'));
 
