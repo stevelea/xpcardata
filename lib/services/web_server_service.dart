@@ -8,12 +8,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vehicle_data.dart';
 import 'data_source_manager.dart';
 import 'debug_logger.dart';
+import 'fleet_analytics_service.dart';
 import 'github_update_service.dart';
+import 'hive_storage_service.dart';
 
 typedef WebAssetLoader = Future<String> Function(String assetPath);
 typedef WebSnapshotProvider = Future<Map<String, dynamic>> Function();
 typedef WebSessionsProvider = Future<List<Map<String, dynamic>>> Function(int limit);
 typedef WebLogsProvider = List<String> Function();
+typedef WebSettingsProvider = Future<Map<String, dynamic>> Function();
+typedef WebFleetProvider = Future<Map<String, dynamic>> Function();
 
 /// Embedded HTTP server that exposes the app's dashboard, live PID values,
 /// charging history and debug log to a browser on the LAN or Tailscale.
@@ -64,6 +68,8 @@ class WebServerService {
   WebSnapshotProvider? snapshotOverride;
   WebSessionsProvider? sessionsOverride;
   WebLogsProvider? logsOverride;
+  WebSettingsProvider? settingsOverride;
+  WebFleetProvider? fleetOverride;
 
   bool get isRunning => _server != null;
   bool get isEnabled => _enabled;
@@ -333,6 +339,15 @@ class WebServerService {
         final limit = _intParam(request, 'limit', 200, 1, 2000);
         response.write(jsonEncode({'logs': _logs(limit)}));
         break;
+      case '/api/settings':
+        response.write(jsonEncode(await settingsSnapshot()));
+        break;
+      case '/api/manual':
+        response.write(jsonEncode({'manual': await _manualMarkdown()}));
+        break;
+      case '/api/fleet':
+        response.write(jsonEncode(await fleetSnapshot()));
+        break;
       case '/api/health':
         response.write(jsonEncode({
           'ok': true,
@@ -348,6 +363,155 @@ class WebServerService {
     }
 
     await response.close();
+  }
+
+  /// Read-only, redacted view of the app's settings.
+  ///
+  /// Credentials and identifiers that could be used to take over the vehicle's
+  /// MQTT broker, ABRP account or cloud backup are deliberately never included:
+  /// only booleans for "configured", plus non-secret host/port/prefix values.
+  Future<Map<String, dynamic>> settingsSnapshot() async {
+    final override = settingsOverride;
+    if (override != null) return override();
+
+    final hive = HiveStorageService.instance;
+    T? read<T>(String key, T? fallback) => hive.getSetting<T>(key, defaultValue: fallback);
+
+    String? broker;
+    int? brokerPort;
+    String? mqttUser;
+    String? vehicleId;
+    bool mqttEnabled = false;
+    bool haDiscovery = false;
+    bool mqttTls = true;
+    bool abrpConfigured = false;
+    bool abrpEnabled = false;
+    bool locationEnabled = false;
+    bool autoUpdate = false;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      broker = prefs.getString('mqtt_broker');
+      brokerPort = prefs.getInt('mqtt_port');
+      mqttUser = prefs.getString('mqtt_username');
+      vehicleId = prefs.getString('mqtt_vehicle_id');
+      mqttEnabled = prefs.getBool('mqtt_enabled') ?? false;
+      haDiscovery = prefs.getBool('ha_discovery_enabled') ?? false;
+      mqttTls = prefs.getBool('mqtt_use_tls') ?? true;
+      abrpEnabled = prefs.getBool('abrp_enabled') ?? false;
+      abrpConfigured = (prefs.getString('abrp_token') ?? '').isNotEmpty;
+    } catch (e) {
+      _logger.log('[WebServer] Settings unavailable via prefs: $e');
+    }
+
+    try {
+      locationEnabled = read<bool>('location_enabled', false) ?? false;
+      autoUpdate = read<bool>('auto_update_check', false) ?? false;
+    } catch (e) {
+      _logger.log('[WebServer] Settings unavailable via Hive: $e');
+    }
+
+    return {
+      'vehicle': {
+        'model': read<String>('vehicle_model', 'G6'),
+        'customCapacityKwh': read<double>('custom_battery_capacity_kwh', null),
+      },
+      'behavior': {
+        'updateFrequencySeconds': read<int>('update_frequency_seconds', 2),
+        'startMinimised': read<bool>('start_minimised', false),
+        'stayInBackground': read<bool>('stay_in_background', false),
+        'keepAliveEnabled': read<bool>('keep_alive_enabled', false),
+        'backgroundServiceEnabled': read<bool>('background_service_enabled', false),
+        'autoUpdateCheck': autoUpdate,
+        'locationEnabled': locationEnabled,
+      },
+      'alerts': {
+        'lowBatteryPercent': read<double>('alert_low_battery', 20.0),
+        'criticalBatteryPercent': read<double>('alert_critical_battery', 10.0),
+        'highTemperatureCelsius': read<double>('alert_high_temp', 45.0),
+        'auxBatteryProtection': read<bool>('aux_battery_protection_enabled', true),
+        'auxBatteryThresholdVolts': read<double>('aux_battery_protection_threshold', 12.8),
+      },
+      'mqtt': {
+        'enabled': mqttEnabled,
+        'broker': broker == null || broker.isEmpty ? null : broker,
+        'port': brokerPort,
+        'username': mqttUser == null || mqttUser.isEmpty ? null : mqttUser,
+        // Never expose the password.
+        'passwordSet': (await _prefsValue<String>('mqtt_password') ?? '').isNotEmpty,
+        'tls': mqttTls,
+        'vehicleId': vehicleId,
+        'homeAssistantDiscovery': haDiscovery,
+      },
+      'abrp': {'enabled': abrpEnabled, 'tokenConfigured': abrpConfigured},
+      'remoteAccess': {
+        'enabled': isEnabled,
+        'running': isRunning,
+        'port': _port,
+        'tokenRequired': _token.isNotEmpty,
+      },
+      'app': {'version': appVersion},
+    };
+  }
+
+  Future<T?> _prefsValue<T>(String key) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.get(key) as T?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Anonymous fleet aggregates (same data as the app's Fleet Stats page).
+  /// Returns `enabled: false` when the user has not opted in; never blocks the
+  /// UI for long because the Firestore query is bounded by a timeout.
+  Future<Map<String, dynamic>> fleetSnapshot() async {
+    final override = fleetOverride;
+    if (override != null) return override();
+
+    final service = FleetAnalyticsService.instance;
+    if (!service.isEnabled) {
+      return {'enabled': false, 'stats': null};
+    }
+
+    try {
+      final stats = await service.getFleetStats().timeout(const Duration(seconds: 8));
+      if (stats == null) {
+        return {'enabled': true, 'stats': null};
+      }
+      return {
+        'enabled': true,
+        'stats': {
+          'totalContributors': stats.totalContributors,
+          'totalContributions': stats.totalContributions,
+          'avgSoh': stats.avgSoh,
+          'avgChargingPowerAc': stats.avgChargingPowerAc,
+          'avgChargingPowerDc': stats.avgChargingPowerDc,
+          'sohDistribution': stats.sohDistribution,
+          'chargingTypeDistribution': stats.chargingTypeDistribution,
+          'countryDistribution': stats.countryDistribution,
+          'lastUpdated': stats.lastUpdated.toIso8601String(),
+        },
+      };
+    } catch (e) {
+      _logger.log('[WebServer] Fleet stats unavailable: $e');
+      return {'enabled': true, 'stats': null, 'error': 'unavailable'};
+    }
+  }
+
+  /// The in-app manual (docs/MANUAL.md), rendered as plain markdown by the UI.
+  String? _manualCache;
+  Future<String> _manualMarkdown() async {
+    if (_manualCache != null) return _manualCache!;
+    final loader = assetLoaderOverride ?? rootBundle.loadString;
+    try {
+      _manualCache = await loader('docs/MANUAL.md');
+    } catch (e) {
+      _logger.log('[WebServer] Manual asset unavailable: $e');
+      _manualCache = '';
+    }
+    return _manualCache!;
   }
 
   int _intParam(HttpRequest request, String name, int fallback, int min, int max) {

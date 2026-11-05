@@ -100,6 +100,75 @@ Field names match `ChargingSession.toJson`: `id`, `startTime`, `endTime`,
 Debug log tail, oldest first. `limit` is clamped to 1–2000. This is the same
 buffer shown in Settings → Debug Log.
 
+## `GET /api/settings`
+
+Read-only, redacted view of the app's settings — the same sections as
+**Settings** on the phone, minus anything secret:
+
+```json
+{
+  "vehicle": {"model": "G6_24LR", "customCapacityKwh": null},
+  "behavior": {"updateFrequencySeconds": 2, "startMinimised": false,
+               "stayInBackground": false, "keepAliveEnabled": false,
+               "backgroundServiceEnabled": false, "autoUpdateCheck": false,
+               "locationEnabled": true},
+  "alerts": {"lowBatteryPercent": 20.0, "criticalBatteryPercent": 10.0,
+             "highTemperatureCelsius": 45.0, "auxBatteryProtection": true,
+             "auxBatteryThresholdVolts": 12.8},
+  "mqtt": {"enabled": true, "broker": "homeassistant.local", "port": 1883,
+           "username": "xpeng", "passwordSet": true, "tls": true,
+           "vehicleId": "g6-steve", "homeAssistantDiscovery": true},
+  "abrp": {"enabled": false, "tokenConfigured": true},
+  "remoteAccess": {"enabled": true, "running": true, "port": 8080,
+                   "tokenRequired": false},
+  "app": {"version": "1.4.25"}
+}
+```
+
+There is deliberately **no** MQTT password, ABRP token, backup credentials or web
+token value — only booleans such as `passwordSet`, `tokenConfigured` and
+`tokenRequired`. Model values are the app's internal keys (`G6_24LR`,
+`G9_LR_AWD`, `P7_LR_RWD`, `G3i_SR_RWD`, `CUSTOM`, …).
+
+## `GET /api/fleet`
+
+Anonymous fleet aggregates (the app's Fleet Stats page). The response says
+whether the user opted in:
+
+```json
+{"enabled": false, "stats": null}
+```
+
+```json
+{
+  "enabled": true,
+  "stats": {
+    "totalContributors": 120,
+    "totalContributions": 8400,
+    "avgSoh": 96.4,
+    "avgChargingPowerAc": 7.2,
+    "avgChargingPowerDc": 84.0,
+    "sohDistribution": {"90-100": 80, "80-90": 30},
+    "chargingTypeDistribution": {"ac": 5000, "dc": 3400},
+    "countryDistribution": {"AU": 40, "DE": 35},
+    "lastUpdated": "2026-11-05T12:00:00+11:00"
+  }
+}
+```
+
+`stats: null` with `enabled: true` means opted in but no aggregate available yet
+(offline, or the Firestore query timed out after 8 s). No personal data is
+involved: this is the same aggregate the app displays.
+
+## `GET /api/manual`
+
+The bundled manual (`docs/MANUAL.md`) as markdown text, so the browser can render
+the same help the app shows:
+
+```json
+{"manual": "# XPCarData Manual\n\n## Overview\n..."}
+```
+
 ## `GET /api/health`
 
 Liveness probe, no vehicle data required:
@@ -140,6 +209,8 @@ done
 
 ## Limits
 
+- `/api/settings` and `/api/fleet` mirror the app's pages; they are read-only and
+  the server has no endpoint that changes a setting.
 - The server only runs while the app process is alive.
 - Binding is IPv4 any-interface; there is no TLS. Tailscale provides the
   encrypted transport, or run it on a trusted LAN only.

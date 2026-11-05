@@ -268,7 +268,12 @@ The web UI has the same pages as the app:
 - **Charging** — recent sessions: energy added, SOC delta, duration, type,
   cost, location.
 - **Logs** — the debug log tail.
-- **About** — server version, port, uptime and data source.
+- **Settings** — read-only view of the same sections as the app (vehicle model,
+  behaviour, alert thresholds, MQTT/Home Assistant, ABRP, remote access) plus the
+  anonymous fleet statistics. Passwords and tokens are never shown — only
+  whether they are configured.
+- **About** — server version, port, uptime and data source, and a link to the
+  in-app **Manual**.
 
 The data behind it is exactly the payload the app publishes to MQTT, so the
 browser and Home Assistant cannot disagree. The HTTP API is documented in

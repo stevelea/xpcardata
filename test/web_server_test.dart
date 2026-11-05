@@ -38,6 +38,7 @@ void main() {
           'assets/web/app.css' => 'body{}',
           'assets/web/app.js' => '// js',
           'assets/web/favicon.svg' => '<svg/>',
+          'docs/MANUAL.md' => '# Manual\n\nBody text.',
           _ => throw Exception('unknown asset $path'),
         };
     service.snapshotOverride = () async => {
@@ -49,6 +50,12 @@ void main() {
           {'id': 's1', 'energyAddedKwh': 12.5, 'isActive': false},
         ];
     service.logsOverride = () => List.generate(5, (i) => 'log line $i');
+    service.settingsOverride = () async => {
+          'vehicle': {'model': 'G6_24LR', 'customCapacityKwh': null},
+          'mqtt': {'enabled': true, 'broker': 'homeassistant.local', 'port': 1883, 'passwordSet': true},
+          'remoteAccess': {'enabled': true, 'running': true, 'port': port, 'tokenRequired': false},
+        };
+    service.fleetOverride = () async => {'enabled': false, 'stats': null};
 
     final started = await service.start(
       portOverride: 0,
@@ -65,6 +72,8 @@ void main() {
     service.snapshotOverride = null;
     service.sessionsOverride = null;
     service.logsOverride = null;
+    service.settingsOverride = null;
+    service.fleetOverride = null;
   });
 
   test('serves the web UI at / with an html content type', () async {
@@ -126,6 +135,42 @@ void main() {
     expect(jsonDecode(clamped.$3)['logs'], hasLength(5));
   });
 
+  group('settings, manual and fleet endpoints', () {
+    test('/api/settings returns the redacted snapshot', () async {
+      final (status, type, body) = await get('/api/settings');
+      expect(status, 200);
+      expect(type, 'application/json');
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      expect(json['vehicle']['model'], 'G6_24LR');
+      expect(json['mqtt']['passwordSet'], isTrue);
+      // Credentials must never be serialized.
+      expect(body, isNot(contains('mqtt_password')));
+      expect(body, isNot(contains('abrp_token')));
+    });
+
+    test('/api/settings never leaks the web access token value', () async {
+      await service.setToken('secret-token');
+      final (status, _, body) = await get('/api/settings', token: 'secret-token');
+      expect(status, 200);
+      expect(body, isNot(contains('secret-token')));
+      await service.setToken('');
+    });
+
+    test('/api/manual serves the bundled markdown', () async {
+      final (status, _, body) = await get('/api/manual');
+      expect(status, 200);
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      expect(json['manual'], contains('# Manual'));
+    });
+
+    test('/api/fleet reports the opt-in state', () async {
+      final (status, _, body) = await get('/api/fleet');
+      expect(status, 200);
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      expect(json['enabled'], isFalse);
+    });
+  });
+
   group('token authentication', () {
     setUp(() async => service.setToken('secret-token'));
 
@@ -143,6 +188,13 @@ void main() {
     test('accepts the token as a query parameter', () async {
       final (status, _, _) = await get('/api/health?token=secret-token');
       expect(status, 200);
+    });
+
+    test('covers the settings and manual endpoints too', () async {
+      expect((await get('/api/settings')).$1, 401);
+      expect((await get('/api/manual')).$1, 401);
+      expect((await get('/api/fleet')).$1, 401);
+      expect((await get('/api/settings', token: 'secret-token')).$1, 200);
     });
 
     test('static UI files stay public so the browser can load the page', () async {
