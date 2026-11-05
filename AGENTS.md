@@ -14,15 +14,16 @@ carsoc/                    <- Flutter app (this repo root)
   lib/screens/             UI (home dashboard, live data, charging history, settings/*)
   lib/services/            OBD, MQTT, ABRP, charging sessions, web server, updater
   assets/web/              embedded web UI served by WebServerService
-  test/                    37 unit + integration tests (flutter_test)
+  test/                    44 unit + integration tests (flutter_test)
   android/                 Kotlin shell (MainActivity channels), Gradle config
   docs/                    release notes, user guide, PID refs, API docs
 ```
 
 Key services: `data_source_manager.dart` (routing), `obd_service.dart` (ELM327 +
 PID polling), `mqtt_service.dart` (HA discovery + JSON payload), `web_server_service.dart`
-(remote view), `charging_session_service.dart`, `github_update_service.dart`
-(version constants).
+(remote view: `/api/state`, `/api/sessions`, `/api/logs`, `/api/settings`,
+`/api/fleet`, `/api/manual`), `charging_session_service.dart`,
+`github_update_service.dart` (version constants).
 
 ## Commands (this machine's working recipe)
 
@@ -40,7 +41,7 @@ PATH=/tmp/shims:$PATH GRADLE_OPTS="-Duser.home=$PWD/.home" \
   ./.flutter_sdk/bin/flutter build apk --debug
 
 ./.flutter_sdk/bin/flutter analyze          # baseline ~146 issues, 0 errors
-./.flutter_sdk/bin/flutter test             # 37 tests, all pass
+./.flutter_sdk/bin/flutter test             # 44 tests, all pass
 ```
 
 ## Gotchas

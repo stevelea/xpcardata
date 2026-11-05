@@ -272,8 +272,11 @@ The web UI has the same pages as the app:
   behaviour, alert thresholds, MQTT/Home Assistant, ABRP, remote access) plus the
   anonymous fleet statistics. Passwords and tokens are never shown — only
   whether they are configured.
-- **About** — server version, port, uptime and data source, and a link to the
-  in-app **Manual**.
+- **About** — server version, port, uptime and data source.
+- **Manual** — the in-app manual, rendered read-only.
+
+Every page is read-only: the web view can show what the phone shows but cannot
+change settings or control the car.
 
 The data behind it is exactly the payload the app publishes to MQTT, so the
 browser and Home Assistant cannot disagree. The HTTP API is documented in

@@ -9,8 +9,9 @@ Tailscale network. Enable it in **Settings → Remote Access**, then open the
 address shown on the phone (default port 8080).
 
 - Same pages and fields as the phone app: dashboard tiles, live PID values with
-  raw hex bytes, cell voltages and temperatures, charging sessions, and the
-  debug log.
+  raw hex bytes, cell voltages and temperatures, charging sessions, read-only
+  settings (including MQTT/HA state without secrets), the anonymous fleet
+  statistics, the debug log and the in-app manual.
 - The JSON API serves exactly the payload published to MQTT, so the browser and
   Home Assistant can never disagree.
 - Optional access token; leave it empty on a trusted home network, set one
@@ -54,8 +55,9 @@ address shown on the phone (default port 8080).
 
 ### Tests
 
-37 unit and integration tests now cover the WiCAN layout, the web server
-(routes, auth, static assets), version comparison, and the model profiles.
+44 unit and integration tests now cover the WiCAN layout, the web server
+(routes, auth, static assets, settings/fleet/manual endpoints, credential
+redaction), version comparison, and the model profiles.
 
 ---
 
