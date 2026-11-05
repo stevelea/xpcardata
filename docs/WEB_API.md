@@ -103,32 +103,48 @@ buffer shown in Settings → Debug Log.
 ## `GET /api/settings`
 
 Read-only, redacted view of the app's settings — the same sections as
-**Settings** on the phone, minus anything secret:
+**Settings → Connections / App** on the phone, minus anything secret.
+
+Values are read through the app's own ordering: **Hive first, then
+SharedPreferences** (AI boxes cannot open the prefs channel at all). Older
+builds read SharedPreferences only, which showed an empty broker while the app
+showed the configured one.
 
 ```json
 {
+  "settingsAvailable": true,
   "vehicle": {"model": "G6_24LR", "customCapacityKwh": null},
   "behavior": {"updateFrequencySeconds": 2, "startMinimised": false,
-               "stayInBackground": false, "keepAliveEnabled": false,
-               "backgroundServiceEnabled": false, "autoUpdateCheck": false,
+               "stayInBackground": true, "keepAliveEnabled": true,
+               "backgroundServiceEnabled": true, "autoUpdateCheck": true,
                "locationEnabled": true},
   "alerts": {"lowBatteryPercent": 20.0, "criticalBatteryPercent": 10.0,
              "highTemperatureCelsius": 45.0, "auxBatteryProtection": true,
-             "auxBatteryThresholdVolts": 12.8},
-  "mqtt": {"enabled": true, "broker": "homeassistant.local", "port": 1883,
+             "auxBatteryThresholdVolts": 12.0},
+  "mqtt": {"enabled": true, "broker": "homeassistant.local", "port": 8883,
            "username": "xpeng", "passwordSet": true, "tls": true,
-           "vehicleId": "g6-steve", "homeAssistantDiscovery": true},
+           "vehicleId": "g6-steve", "homeAssistantDiscovery": true,
+           "reconnectIntervalSeconds": 0},
+  "tailscale": {"installed": true, "vpnActive": false,
+                "autoConnect": true, "autoReconnect": true},
+  "obdProxy": {"enabled": true, "port": 35000, "clientConnected": false},
+  "bm300": {"enabled": false, "connected": false},
   "abrp": {"enabled": false, "tokenConfigured": true},
   "remoteAccess": {"enabled": true, "running": true, "port": 8080,
                    "tokenRequired": false},
-  "app": {"version": "1.4.25"}
+  "app": {"version": "1.4.26"}
 }
 ```
 
-There is deliberately **no** MQTT password, ABRP token, backup credentials or web
-token value — only booleans such as `passwordSet`, `tokenConfigured` and
-`tokenRequired`. Model values are the app's internal keys (`G6_24LR`,
-`G9_LR_AWD`, `P7_LR_RWD`, `G3i_SR_RWD`, `CUSTOM`, …).
+Notes:
+
+- `port` defaults to 8883 (TLS) like the app does; `reconnectIntervalSeconds: 0`
+  means auto-reconnect is disabled.
+- `settingsAvailable: false` means neither Hive nor SharedPreferences answered —
+  the values are defaults, and the web UI says so.
+- There is deliberately **no** MQTT password, ABRP token, backup credential or
+  web token value — only booleans such as `passwordSet`, `tokenConfigured` and
+  `tokenRequired`.
 
 ## `GET /api/fleet`
 

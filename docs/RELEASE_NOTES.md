@@ -1,5 +1,25 @@
 # XPCarData Release Notes
 
+## Version 1.4.27 - 2026-11-05
+
+### Remote-view settings page matches the app
+The web Settings page showed an empty MQTT broker/port and defaults while the
+phone app showed the configured values. Cause: the API read SharedPreferences
+only, but the app reads **Hive first, SharedPreferences second** — and on AI
+boxes the SharedPreferences channel cannot be opened at all.
+
+- New `SettingsReader` uses the app's own lookup order for every key, so the
+  browser and the phone now show the same values.
+- The settings page also gained the sections it was missing: TLS, auto-reconnect
+  interval, Tailscale (installed / VPN active / auto-connect / auto-reconnect),
+  the OBD WiFi proxy (state, port, client) and BM300 Pro (enabled / connected).
+- `settingsAvailable: false` in the API tells the UI when no settings store
+  answered, so it can say "showing defaults" instead of pretending.
+
+Tests: 77.
+
+---
+
 ## Version 1.4.26 - 2026-11-05
 
 Bug fixes for a live parked-G6 log where the app stopped reading the car and

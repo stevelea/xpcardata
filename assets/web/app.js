@@ -87,7 +87,9 @@
     shield: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 5.5 5.7v5.6c0 4.2 3 7.5 6.5 8.7 3.5-1.2 6.5-4.5 6.5-8.7V5.7z"/><path d="m9.5 11.5 1.8 1.8 3.4-3.6"/></svg>',
     wifi: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 9a13 13 0 0 1 17 0M6.5 12.5a8.5 8.5 0 0 1 11 0M9.8 16a4.5 4.5 0 0 1 4.4 0"/><circle cx="12" cy="19" r="1"/></svg>',
     route: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 19h6a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h10"/><circle cx="4" cy="19" r="1.6"/><circle cx="20" cy="7" r="1.6"/></svg>',
-    globe: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M3.5 12h17M12 3.5c2.5 2.4 2.5 14.6 0 17M12 3.5c-2.5 2.4-2.5 14.6 0 17"/></svg>'
+    globe: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M3.5 12h17M12 3.5c2.5 2.4 2.5 14.6 0 17M12 3.5c-2.5 2.4-2.5 14.6 0 17"/></svg>',
+    vpn: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 5.5 5.7v5.6c0 4.2 3 7.5 6.5 8.7 3.5-1.2 6.5-4.5 6.5-8.7V5.7z"/><path d="M9.5 12h5M12 9.5v5"/></svg>',
+    bluetooth: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 7 10 10-5 4V3l5 4L7 17"/></svg>'
   };
 
   /* ================================================================== *
@@ -1302,6 +1304,20 @@
     return DASH;
   }
 
+  function labelledChip(value, onLabel, offLabel) {
+    if (value === true) return '<span class="badge is-active">' + esc(onLabel) + '</span>';
+    if (value === false) return '<span class="badge">' + esc(offLabel) + '</span>';
+    return DASH;
+  }
+
+  /* Mirrors the Connections screen: 0 means auto-reconnect is disabled. */
+  function reconnectText(seconds) {
+    var value = num(seconds);
+    if (value === null) return DASH;
+    if (value === 0) return 'Disabled';
+    return 'every ' + fmt0(value) + 's';
+  }
+
   function settingsVehicleCard(vehicle) {
     var v = vehicle && typeof vehicle === 'object' ? vehicle : {};
     var code = typeof v.model === 'string' && v.model ? v.model : null;
@@ -1354,16 +1370,56 @@
     return card(
       'MQTT / Home Assistant',
       kvList(
-        kv('Publishing', onOff(m.enabled)) +
-          kv('Broker', typeof m.broker === 'string' && m.broker ? esc(m.broker) : DASH) +
+        kv('Enable MQTT Publishing', onOff(m.enabled)) +
+          kv('Broker Address', typeof m.broker === 'string' && m.broker ? esc(m.broker) : DASH) +
           kv('Port', fmt0(m.port)) +
+          kv('Vehicle ID', typeof m.vehicleId === 'string' && m.vehicleId ? esc(m.vehicleId) : DASH) +
           kv('Username', typeof m.username === 'string' && m.username ? esc(m.username) : DASH) +
           kv('Password', configuredChip(m.passwordSet)) +
-          kv('TLS', onOff(m.tls)) +
-          kv('Vehicle ID', typeof m.vehicleId === 'string' && m.vehicleId ? esc(m.vehicleId) : DASH) +
-          kv('HA discovery', onOff(m.homeAssistantDiscovery))
+          kv('Use TLS/SSL', onOff(m.tls)) +
+          kv('Home Assistant Discovery', onOff(m.homeAssistantDiscovery)) +
+          kv('Auto-Reconnect Interval', reconnectText(m.reconnectIntervalSeconds))
       ),
       ICON.wifi
+    );
+  }
+
+  function settingsTailscaleCard(tailscale) {
+    var t = tailscale && typeof tailscale === 'object' ? tailscale : {};
+    return card(
+      'Tailscale',
+      kvList(
+        kv('Installed', labelledChip(t.installed, 'Installed', 'Not found')) +
+          kv('VPN active', onOff(t.vpnActive)) +
+          kv('Auto-Connect on Startup', onOff(t.autoConnect)) +
+          kv('Auto-Reconnect', onOff(t.autoReconnect))
+      ),
+      ICON.vpn
+    );
+  }
+
+  function settingsObdProxyCard(proxy) {
+    var p = proxy && typeof proxy === 'object' ? proxy : {};
+    return card(
+      'OBD proxy',
+      kvList(
+        kv('WiFi proxy', onOff(p.enabled)) +
+          kv('Port', fmt0(p.port)) +
+          kv('Client', labelledChip(p.clientConnected, 'Connected', 'None'))
+      ),
+      ICON.plug
+    );
+  }
+
+  function settingsBm300Card(bm300) {
+    var b = bm300 && typeof bm300 === 'object' ? bm300 : {};
+    return card(
+      'BM300 Pro',
+      kvList(
+        kv('Enabled', onOff(b.enabled)) +
+          kv('Battery monitor', labelledChip(b.connected, 'Connected', 'Not connected'))
+      ),
+      ICON.bluetooth
     );
   }
 
@@ -1495,10 +1551,20 @@
     );
   }
 
+  function updateSettingsStoreNotice(settings) {
+    var notice = $('#settings-store-notice');
+    if (!notice) return;
+    notice.hidden = !(settings && settings.settingsAvailable === false);
+  }
+
   function renderSettings() {
     var grid = $('#settings-cards');
     if (!grid) return;
     var settings = state.settings;
+
+    /* The inline "store unavailable" banner is outside the card grid, so keep
+       it in sync before the change-detection guard below. */
+    updateSettingsStoreNotice(settings);
 
     /* Re-render only when the payload actually changed, so the 2 s state poll
        does not rebuild these cards while the user is reading them. */
@@ -1518,6 +1584,9 @@
       cards.push(settingsBehaviourCard(settings.behavior));
       cards.push(settingsAlertsCard(settings.alerts));
       cards.push(settingsMqttCard(settings.mqtt));
+      cards.push(settingsTailscaleCard(settings.tailscale));
+      cards.push(settingsObdProxyCard(settings.obdProxy));
+      cards.push(settingsBm300Card(settings.bm300));
       cards.push(settingsAbrpCard(settings.abrp));
       cards.push(settingsRemoteCard(settings.remoteAccess));
     } else {

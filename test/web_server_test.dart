@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:carsoc/services/settings_reader.dart';
 import 'package:carsoc/services/web_server_service.dart';
 
 /// Integration tests for the embedded remote-view HTTP server: static UI
@@ -74,6 +75,7 @@ void main() {
     service.logsOverride = null;
     service.settingsOverride = null;
     service.fleetOverride = null;
+    service.settingsReaderOverride = null;
   });
 
   test('serves the web UI at / with an html content type', () async {
@@ -171,6 +173,51 @@ void main() {
     });
   });
 
+  group('settings snapshot follows the app lookup order', () {
+    test('Hive values win over SharedPreferences (AI-box case)', () async {
+      service.settingsOverride = null;
+      service.settingsReaderOverride = SettingsReader(
+        prefsLoader: () async => {'mqtt_broker': 'from-prefs.local', 'mqtt_port': 1883},
+        hiveLoader: (key) => {
+              'mqtt_broker': 'homeassistant.local',
+              'mqtt_port': 8883,
+              'mqtt_enabled': true,
+              'mqtt_use_tls': true,
+              'ha_discovery_enabled': true,
+              'mqtt_reconnect_interval': 30,
+              'vehicle_model': 'G9_LR_AWD',
+            }[key],
+        hiveAvailable: true,
+      );
+
+      final json = jsonDecode((await get('/api/settings')).$3) as Map<String, dynamic>;
+      expect(json['settingsAvailable'], isTrue);
+      expect(json['mqtt']['broker'], 'homeassistant.local');
+      expect(json['mqtt']['port'], 8883);
+      expect(json['mqtt']['reconnectIntervalSeconds'], 30);
+      expect(json['mqtt']['enabled'], isTrue);
+      expect(json['vehicle']['model'], 'G9_LR_AWD');
+      expect(json['tailscale'], isA<Map<String, dynamic>>());
+      expect(json['obdProxy'], isA<Map<String, dynamic>>());
+      expect(json['bm300'], isA<Map<String, dynamic>>());
+      service.settingsReaderOverride = null;
+    });
+
+    test('settingsAvailable is false when no store answers', () async {
+      service.settingsOverride = null;
+      service.settingsReaderOverride = SettingsReader(
+        prefsLoader: () async => null,
+        hiveLoader: (key) => null,
+        hiveAvailable: false,
+      );
+
+      final json = jsonDecode((await get('/api/settings')).$3) as Map<String, dynamic>;
+      expect(json['settingsAvailable'], isFalse);
+      expect(json['mqtt']['port'], 8883, reason: 'app default port');
+      service.settingsReaderOverride = null;
+    });
+  });
+
   group('default providers', () {
     test('settingsSnapshot works without injected overrides', () async {
       service.settingsOverride = null;
@@ -183,6 +230,7 @@ void main() {
 
     test('fleetSnapshot never throws when analytics is unavailable', () async {
       service.fleetOverride = null;
+    service.settingsReaderOverride = null;
       final snapshot = await service.fleetSnapshot();
       expect(snapshot.containsKey('enabled'), isTrue);
       expect(snapshot.containsKey('stats'), isTrue);

@@ -1325,6 +1325,16 @@ main {
   white-space: nowrap;
 }
 
+.notice-warn {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.08);
+  color: #fcd34d;
+}
+
+.notice-warn .ico {
+  color: var(--warn);
+}
+
 .state {
   display: inline-flex;
   align-items: center;

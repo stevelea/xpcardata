@@ -4,7 +4,7 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![Flutter](https://img.shields.io/badge/Flutter-3.x-blue)
-![Version](https://img.shields.io/badge/version-1.4.26-orange)
+![Version](https://img.shields.io/badge/version-1.4.27-orange)
 
 ## Screenshots
 
@@ -63,10 +63,10 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 ### Download
 Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcardata/releases).
 
-**Current Version:** v1.4.26
+**Current Version:** v1.4.27
 
-1. Download `XPCarData-v1.4.26.zip` from the [latest release](https://github.com/stevelea/xpcardata/releases/latest)
-2. Extract the ZIP file to get `XPCarData-v1.4.26.apk`
+1. Download `XPCarData-v1.4.27.zip` from the [latest release](https://github.com/stevelea/xpcardata/releases/latest)
+2. Extract the ZIP file to get `XPCarData-v1.4.27.apk`
 3. Install the APK on your Android device (enable "Install from unknown sources" if prompted)
 
 ### Requirements
@@ -160,7 +160,10 @@ Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcard
 
 ## Version History
 
-### v1.4.26 (Current)
+### v1.4.27 (Current)
+- **Web settings page now matches the app** - the API read SharedPreferences only; the app reads Hive first (and prefs is unavailable on AI boxes), so the browser showed blanks/defaults. A shared `SettingsReader` fixes the ordering, and the page gained TLS, auto-reconnect, Tailscale, OBD proxy and BM300 sections. `settingsAvailable: false` now means "showing defaults".
+
+### v1.4.26
 - **12V protection fixed** - the guard paused polling at 12.6V (old 12.8V default) and could never resume because the pause blocked `AUX_V` reads. Default is now 12.0V, pausing needs 3 consecutive low samples, and a 60s recheck resumes polling automatically.
 - **Implausible values dropped** - pack voltage below 100V (contactors open: 9.7V on a parked G6) is ignored instead of poisoning power/range; DC charge current is only published when a plausible DC inlet voltage exists (no more "400A / 18V" while parked).
 - **CAN ERROR retry** - transport errors get one retry instead of dropping four PIDs per cycle.

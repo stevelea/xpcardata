@@ -8,9 +8,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vehicle_data.dart';
 import 'data_source_manager.dart';
 import 'debug_logger.dart';
+import 'bm300_battery_service.dart';
 import 'fleet_analytics_service.dart';
 import 'github_update_service.dart';
+import 'obd_proxy_service.dart';
+import 'tailscale_service.dart';
 import 'hive_storage_service.dart';
+import 'settings_reader.dart';
 
 typedef WebAssetLoader = Future<String> Function(String assetPath);
 typedef WebSnapshotProvider = Future<Map<String, dynamic>> Function();
@@ -70,6 +74,7 @@ class WebServerService {
   WebLogsProvider? logsOverride;
   WebSettingsProvider? settingsOverride;
   WebFleetProvider? fleetOverride;
+  SettingsReader? settingsReaderOverride;
 
   bool get isRunning => _server != null;
   bool get isEnabled => _enabled;
@@ -399,83 +404,96 @@ class WebServerService {
 
   /// Read-only, redacted view of the app's settings.
   ///
-  /// Credentials and identifiers that could be used to take over the vehicle's
-  /// MQTT broker, ABRP account or cloud backup are deliberately never included:
-  /// only booleans for "configured", plus non-secret host/port/prefix values.
+  /// Values come through [SettingsReader], which uses the *same* lookup order
+  /// as the app's settings screens (Hive, then SharedPreferences). Reading only
+  /// SharedPreferences here used to show an empty broker/port on devices where
+  /// that channel is unavailable, even though the app showed the real values.
+  ///
+  /// Credentials (MQTT password, ABRP token, backup keys, web token) are never
+  /// serialized — only booleans such as `passwordSet`/`tokenRequired`.
   Future<Map<String, dynamic>> settingsSnapshot() async {
     final override = settingsOverride;
     if (override != null) return override();
 
-    final hive = HiveStorageService.instance;
-    T? read<T>(String key, T? fallback) => hive.getSetting<T>(key, defaultValue: fallback);
+    final reader = settingsReaderOverride ?? SettingsReader();
 
-    String? broker;
-    int? brokerPort;
-    String? mqttUser;
-    String? vehicleId;
-    bool mqttEnabled = false;
-    bool haDiscovery = false;
-    bool mqttTls = true;
-    bool abrpConfigured = false;
-    bool abrpEnabled = false;
-    bool locationEnabled = false;
-    bool autoUpdate = false;
+    final model = await reader.string('vehicle_model') ?? 'G6';
+    final customCapacity = await reader.real('custom_battery_capacity_kwh');
 
+    final mqttEnabled = await reader.boolean('mqtt_enabled') ?? false;
+    final broker = await reader.string('mqtt_broker');
+    final port = await reader.integer('mqtt_port') ?? 8883;
+    final username = await reader.string('mqtt_username');
+    final password = await reader.string('mqtt_password');
+    final vehicleId = await reader.string('mqtt_vehicle_id');
+    final tls = await reader.boolean('mqtt_use_tls') ?? true;
+    final haDiscovery = await reader.boolean('ha_discovery_enabled') ?? false;
+    final reconnectSeconds = await reader.integer('mqtt_reconnect_interval') ?? 0;
+
+    bool tailscaleInstalled = false;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      broker = prefs.getString('mqtt_broker');
-      brokerPort = prefs.getInt('mqtt_port');
-      mqttUser = prefs.getString('mqtt_username');
-      vehicleId = prefs.getString('mqtt_vehicle_id');
-      mqttEnabled = prefs.getBool('mqtt_enabled') ?? false;
-      haDiscovery = prefs.getBool('ha_discovery_enabled') ?? false;
-      mqttTls = prefs.getBool('mqtt_use_tls') ?? true;
-      abrpEnabled = prefs.getBool('abrp_enabled') ?? false;
-      abrpConfigured = (prefs.getString('abrp_token') ?? '').isNotEmpty;
+      tailscaleInstalled = await TailscaleService.instance
+          .isInstalled()
+          .timeout(const Duration(seconds: 2));
     } catch (e) {
-      _logger.log('[WebServer] Settings unavailable via prefs: $e');
+      _logger.log('[WebServer] Tailscale install check unavailable: $e');
     }
 
-    try {
-      locationEnabled = read<bool>('location_enabled', false) ?? false;
-      autoUpdate = read<bool>('auto_update_check', false) ?? false;
-    } catch (e) {
-      _logger.log('[WebServer] Settings unavailable via Hive: $e');
-    }
+    final proxy = OBDProxyService.instance;
+    final bm300 = BM300BatteryService.instance;
 
     return {
+      'settingsAvailable': await reader.hasStore,
       'vehicle': {
-        'model': read<String>('vehicle_model', 'G6'),
-        'customCapacityKwh': read<double>('custom_battery_capacity_kwh', null),
+        'model': model,
+        'customCapacityKwh': customCapacity,
       },
       'behavior': {
-        'updateFrequencySeconds': read<int>('update_frequency_seconds', 2),
-        'startMinimised': read<bool>('start_minimised', false),
-        'stayInBackground': read<bool>('stay_in_background', false),
-        'keepAliveEnabled': read<bool>('keep_alive_enabled', false),
-        'backgroundServiceEnabled': read<bool>('background_service_enabled', false),
-        'autoUpdateCheck': autoUpdate,
-        'locationEnabled': locationEnabled,
+        'updateFrequencySeconds': await reader.integer('update_frequency_seconds') ?? 2,
+        'startMinimised': await reader.boolean('start_minimised') ?? false,
+        'stayInBackground': await reader.boolean('stay_in_background') ?? false,
+        'keepAliveEnabled': await reader.boolean('keep_alive_enabled') ?? false,
+        'backgroundServiceEnabled': await reader.boolean('background_service_enabled') ?? false,
+        'autoUpdateCheck': await reader.boolean('auto_update_check') ?? false,
+        'locationEnabled': await reader.boolean('location_enabled') ?? false,
       },
       'alerts': {
-        'lowBatteryPercent': read<double>('alert_low_battery', 20.0),
-        'criticalBatteryPercent': read<double>('alert_critical_battery', 10.0),
-        'highTemperatureCelsius': read<double>('alert_high_temp', 45.0),
-        'auxBatteryProtection': read<bool>('aux_battery_protection_enabled', true),
-        'auxBatteryThresholdVolts': read<double>('aux_battery_protection_threshold', 12.8),
+        'lowBatteryPercent': await reader.real('alert_low_battery') ?? 20.0,
+        'criticalBatteryPercent': await reader.real('alert_critical_battery') ?? 10.0,
+        'highTemperatureCelsius': await reader.real('alert_high_temp') ?? 45.0,
+        'auxBatteryProtection': await reader.boolean('aux_battery_protection_enabled') ?? true,
+        'auxBatteryThresholdVolts': await reader.real('aux_battery_protection_threshold') ?? 12.0,
       },
       'mqtt': {
         'enabled': mqttEnabled,
         'broker': broker == null || broker.isEmpty ? null : broker,
-        'port': brokerPort,
-        'username': mqttUser == null || mqttUser.isEmpty ? null : mqttUser,
-        // Never expose the password.
-        'passwordSet': (await _prefsValue<String>('mqtt_password') ?? '').isNotEmpty,
-        'tls': mqttTls,
-        'vehicleId': vehicleId,
+        'port': port,
+        'username': username == null || username.isEmpty ? null : username,
+        'passwordSet': (password ?? '').isNotEmpty,
+        'tls': tls,
+        'vehicleId': vehicleId == null || vehicleId.isEmpty ? null : vehicleId,
         'homeAssistantDiscovery': haDiscovery,
+        'reconnectIntervalSeconds': reconnectSeconds,
       },
-      'abrp': {'enabled': abrpEnabled, 'tokenConfigured': abrpConfigured},
+      'tailscale': {
+        'installed': tailscaleInstalled,
+        'vpnActive': TailscaleService.instance.isVpnActive,
+        'autoConnect': await reader.boolean('tailscale_auto_connect') ?? false,
+        'autoReconnect': await reader.boolean('tailscale_auto_reconnect') ?? false,
+      },
+      'obdProxy': {
+        'enabled': proxy.isRunning,
+        'port': proxy.port,
+        'clientConnected': proxy.clientAddress != null,
+      },
+      'bm300': {
+        'enabled': bm300.isEnabled,
+        'connected': bm300.isConnected,
+      },
+      'abrp': {
+        'enabled': await reader.boolean('abrp_enabled') ?? false,
+        'tokenConfigured': ((await reader.string('abrp_token')) ?? '').isNotEmpty,
+      },
       'remoteAccess': {
         'enabled': isEnabled,
         'running': isRunning,
@@ -486,18 +504,9 @@ class WebServerService {
     };
   }
 
-  Future<T?> _prefsValue<T>(String key) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.get(key) as T?;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Anonymous fleet aggregates (same data as the app's Fleet Stats page).
-  /// Returns `enabled: false` when the user has not opted in; never blocks the
-  /// UI for long because the Firestore query is bounded by a timeout.
+  /// Anonymous fleet aggregates (the app's Fleet Stats page). Returns
+  /// `enabled: false` when the user has not opted in; never blocks long because
+  /// the Firestore query is bounded by a timeout.
   Future<Map<String, dynamic>> fleetSnapshot() async {
     final override = fleetOverride;
     if (override != null) return override();
