@@ -2,7 +2,7 @@
 
 Android Flutter app that reads an EV over OBD-II (ELM327 / WiCAN) and publishes
 to MQTT / Home Assistant, ABRP, Firebase fleet stats — plus a built-in web UI for
-remote viewing. Currently **v1.4.28**.
+remote viewing. Currently **v1.4.29**.
 
 ## Layout
 
@@ -14,7 +14,7 @@ carsoc/                    <- Flutter app (this repo root)
   lib/screens/             UI (home dashboard, live data, charging history, settings/*)
   lib/services/            OBD, MQTT, ABRP, charging sessions, web server, updater
   assets/web/              embedded web UI served by WebServerService
-  test/                    89 unit + integration tests (flutter_test)
+  test/                    106 unit + integration tests (flutter_test)
   android/                 Kotlin shell (MainActivity channels), Gradle config
   docs/                    release notes, user guide, PID refs, API docs
 ```
@@ -41,7 +41,7 @@ PATH=/tmp/shims:$PATH GRADLE_OPTS="-Duser.home=$PWD/.home" \
   ./.flutter_sdk/bin/flutter build apk --debug
 
 ./.flutter_sdk/bin/flutter analyze          # baseline ~146 issues, 0 errors
-./.flutter_sdk/bin/flutter test             # 89 tests, all pass
+./.flutter_sdk/bin/flutter test             # 106 tests, all pass
 ```
 
 ## Gotchas
@@ -83,7 +83,12 @@ PATH=/tmp/shims:$PATH GRADLE_OPTS="-Duser.home=$PWD/.home" \
     (`Unable to create debug keystore in /Users/<you>/.android`). Pass
     `GRADLE_OPTS="-Duser.home=$PWD/.home"` so the keystore lands inside the
     workspace. Release builds use `android/key.properties` instead.
-11. **Implausible-PID gates** (`lib/services/sensor_sanity.dart`): a parked G6
+11. **Stored PID JSON lags profile edits**: changing a formula in
+    `local_vehicle_profiles.dart` does nothing for existing installs because the
+    PID list is persisted. Add a rule to `lib/models/pid_corrections.dart`
+    (keyed on the wrong formula) so it is rewritten in place; G6-family detection
+    uses the Speed PID header (VCU 7E0 vs BMS 704 on the G3i).
+12. **Implausible-PID gates** (`lib/services/sensor_sanity.dart`): a parked G6
     answers `221101` with 9.7 V (contactors open) and `22031F`/`220320` with
     400 A / 18 V sentinels. Those must never reach MQTT/UI — the gates reject
     them and power is only computed from plausible values. Do not loosen them

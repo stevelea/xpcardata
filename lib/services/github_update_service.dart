@@ -10,7 +10,7 @@ import 'update_versioning.dart';
 
 /// Hardcoded app version (updated during build)
 /// This avoids package_info_plus which fails on AAOS
-const String appVersion = '1.4.28';
+const String appVersion = '1.4.29';
 
 /// Google Play policy forbids self-updating: a store build must not download
 /// and install APKs itself. Build the Play artifact with

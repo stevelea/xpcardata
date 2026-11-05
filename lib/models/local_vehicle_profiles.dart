@@ -452,14 +452,17 @@ class LocalVehicleProfiles {
         parser: (r) => OBDPIDConfig.parseWithFormula(r, 'B4-40'),
       ),
       OBDPIDConfig(
+        // 220326 is a 0.5 °C/LSB sensor: the car answers 0x86 here and the same
+        // 0x86 at 220327 (MOTOR_T, B4/2-40 = 27 °C), while B4-40 produced 94 °C
+        // on an idle car whose other charge temps read 26-27 °C.
         name: 'SLOW_CHG_T3',
         pid: '220326',
-        description: 'Slow Charging Temperature 3 (°C)',
+        description: 'Slow Charging Temperature 3 (°C, 0.5 °C/LSB)',
         type: OBDPIDType.custom,
         header: '7E0',
         priority: PIDPriority.low,
-        formula: 'B4-40',
-        parser: (r) => OBDPIDConfig.parseWithFormula(r, 'B4-40'),
+        formula: 'B4/2-40',
+        parser: (r) => OBDPIDConfig.parseWithFormula(r, 'B4/2-40'),
       ),
       OBDPIDConfig(
         name: 'MOTOR_T',

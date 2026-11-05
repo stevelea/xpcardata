@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/vehicle_data.dart';
+import '../models/pid_corrections.dart';
 import '../models/wican_response_parser.dart';
 import 'sensor_sanity.dart';
 import '../models/obd_pid_config.dart';
@@ -55,10 +56,6 @@ class OBDService {
   bool _ecuWakeupAttempted = false;
   int _consecutive7FErrorCount = 0;
 
-  /// Last DC inlet voltage that passed the plausibility check this session.
-  /// Used to decide whether a DC charge current reading is real (the G6 reports
-  /// 400 A with the inlet at 18 V while parked).
-  double? _lastDcChgVoltage;
   static const int _max7FErrorsBeforeRetry = 5;
 
   Stream<VehicleData> get vehicleDataStream => _dataController.stream;
@@ -368,6 +365,15 @@ class OBDService {
     if (_customPIDs.isEmpty) {
       _logger.log('[OBDService] WARNING: No PIDs configured! Please load a vehicle profile.');
     }
+
+    // Fix formulas that are already persisted on this device (v1.4.29:
+    // SLOW_CHG_T3 / 220326 was stored as B4-40 and showed 94 °C on an idle car).
+    final corrected = PidCorrections.apply(_customPIDs);
+    if (!identical(corrected, _customPIDs)) {
+      _customPIDs = corrected;
+      _logger.log('[OBDService] Applied stored-PID formula corrections (SLOW_CHG_T3)');
+      await _saveCustomPIDs(_customPIDs);
+    }
   }
 
   /// Check if PID profile needs migration to newer version
@@ -437,7 +443,7 @@ class OBDService {
 
     final xpengProfile = LocalVehicleProfiles.findProfile('XPENG G6');
     if (xpengProfile != null) {
-      _customPIDs = xpengProfile.pids;
+      _customPIDs = PidCorrections.apply(xpengProfile.pids);
       final flavor = LocalVehicleProfiles.useLegacyV3XpengProfile ? 'v3 legacy' : 'v$_pidProfileVersion';
       _logger.log('[OBDService] Migrated to XPENG G6 profile ($flavor) with ${_customPIDs.length} PIDs');
 
@@ -1206,18 +1212,36 @@ class OBDService {
               // DC inlet values need cross-validation: with no DC session the
               // G6 answers 22031F with a 400 A sentinel and 220320 with ~18 V.
               else if (nameUpper == 'DC_CHG_V') {
-                if (SensorSanity.isPlausibleDcVoltage(value)) {
-                  _lastDcChgVoltage = value;
+                if (SensorSanity.shouldPublishDcVoltage(packCurrent: batteryCurrent, voltage: value)) {
                   additionalData[pidConfig.name] = value;
                 } else {
-                  _lastDcChgVoltage = null;
-                  _logger.log('[OBDService] DC_CHG_V implausible (${value.toStringAsFixed(0)} V) - no DC session, skipping');
+                  _logger.log('[OBDService] DC_CHG_V skipped (${value.toStringAsFixed(0)} V) - no DC charging current');
                 }
               } else if (nameUpper == 'DC_CHG_A') {
-                if (SensorSanity.isPlausibleDcCurrent(value, voltagePlausible: _lastDcChgVoltage != null)) {
+                if (SensorSanity.shouldPublishDcCurrent(packCurrent: batteryCurrent, current: value)) {
                   additionalData[pidConfig.name] = value;
                 } else {
                   _logger.log('[OBDService] DC_CHG_A implausible (${value.toStringAsFixed(0)} A) - no DC session, skipping');
+                }
+              }
+              // Charge-loop temperatures: a mis-scaled value (220326 with the
+              // old B4-40 formula) read 94 °C on an idle car. Reject anything
+              // outside the plausible band instead of publishing it.
+              else if (nameUpper.startsWith('FAST_CHG_T') || nameUpper.startsWith('SLOW_CHG_T')) {
+                if (SensorSanity.isPlausibleChargeTemperature(value)) {
+                  additionalData[pidConfig.name] = value;
+                } else {
+                  _logger.log('[OBDService] ${pidConfig.name} implausible (${value.toStringAsFixed(0)} °C) - check the PID formula, skipping');
+                }
+              }
+              // Motor speeds: a RWD car answers the front-motor PID with a
+              // sentinel that decodes to 24,000 rpm (parked). Reject impossible
+              // values instead of showing them on the dashboard.
+              else if (nameUpper.contains('MOTOR_RPM')) {
+                if (SensorSanity.isPlausibleMotorRpm(value)) {
+                  additionalData[pidConfig.name] = value;
+                } else {
+                  _logger.log('[OBDService] ${pidConfig.name} implausible (${value.toStringAsFixed(0)} rpm) - sentinel, skipping');
                 }
               }
               // Other values go to additional properties (skip error values)

@@ -1,5 +1,36 @@
 # XPCarData Release Notes
 
+## Version 1.4.29 - 2026-11-05
+
+### SLOW_CHG_T3 read 94 °C on an idle car
+Field log: `220326` answered `0x86` while the pack, motor and other charge
+temperatures sat at 26-28 °C. The car answers the *same* `0x86` on `220327`
+(MOTOR_T), which is decoded as `0x86/2-40 = 27 °C` — so `220326` is a
+0.5 °C/LSB sensor and the old `B4-40` formula doubled the value.
+
+- G6 v4 profile: `SLOW_CHG_T3` now uses `B4/2-40`.
+- Existing installs are corrected in place (stored PID JSON is rewritten, G6
+  family only — G3i and community profiles are untouched).
+- Any charge temperature outside −30…80 °C is rejected instead of published, so a
+  wrong formula shows "—" rather than 94 °C.
+
+### Stray motor speed and DC inlet values
+- `FRONT_MOTOR_RPM` reported **24,000 rpm** while parked: a RWD car answers the
+  front-motor PID with the "not available" value (0x9C40 → 40,000 after which the
+  −16,000 offset leaves 24,000). Values beyond ±20,000 rpm are rejected.
+- `DC_CHG_V` reported **586 V** (≈ pack voltage) with no DC session, which would
+  also have let the 400 A sentinel through on the next cycle. DC inlet voltage and
+  current are now only published while pack current shows charging (`HV_A < -1 A`).
+
+### Less log noise on devices with broken plugin channels
+- Wakelock verification, status-notification and local-notification failures now
+  log once per condition instead of every poll/heartbeat cycle. They still do not
+  affect data collection.
+
+Tests: 106.
+
+---
+
 ## Version 1.4.28 - 2026-11-05
 
 ### Remote-access settings now survive a restart

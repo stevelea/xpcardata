@@ -18,6 +18,17 @@ class SensorSanity {
   /// Above this it is a 900 V-class pack (very large margin).
   static const double maxPlausiblePackVoltage = 1000.0;
 
+  /// Pack/charge coolant temperatures live in this band; 94 °C at rest means the
+  /// value was decoded with the wrong scale (220326 case) and must not be shown.
+  static const double minPlausibleChargeTemp = -30.0;
+  static const double maxPlausibleChargeTemp = 80.0;
+
+  static bool isPlausibleChargeTemperature(double value) {
+    return value.isFinite &&
+        value >= minPlausibleChargeTemp &&
+        value <= maxPlausibleChargeTemp;
+  }
+
   /// A DC fast-charge session needs a real pack voltage at the inlet.
   static const double minPlausibleDcVoltage = 50.0;
 
@@ -99,6 +110,43 @@ class SensorSanity {
   static double? sanitizeSpeed(double? value) {
     if (value == null) return null;
     return isPlausibleSpeed(value) ? value : null;
+  }
+
+  /// Fastest production EV traction motor is ~18,000 rpm; 20,000 is a ceiling.
+  static const double maxPlausibleMotorRpm = 20000.0;
+
+  /// True for a motor speed a real car can report.
+  ///
+  /// A parked RWD G6 answered `220317` with 0x9C40, which decodes to 24,000 rpm
+  /// after the -16,000 offset — the "not available" value for a motor the car
+  /// does not have. Anything beyond ±20,000 rpm is rejected.
+  static bool isPlausibleMotorRpm(double value) {
+    return value.isFinite && value.abs() <= maxPlausibleMotorRpm;
+  }
+
+  static double? sanitizeMotorRpm(double? value) {
+    if (value == null) return null;
+    return isPlausibleMotorRpm(value) ? value : null;
+  }
+
+  /// A DC fast-charge session needs current flowing *into* the pack.
+  ///
+  /// The G6 reports inlet voltage ≈ pack voltage and a 400 A sentinel even with
+  /// no session, so voltage alone cannot prove charging; HV pack current can
+  /// (negative = charging).
+  static bool isDcSessionActive(double? packCurrent) {
+    return packCurrent != null && packCurrent.isFinite && packCurrent < -1.0;
+  }
+
+  /// DC inlet voltage may only be published during a real DC session.
+  static bool shouldPublishDcVoltage({required double? packCurrent, required double voltage}) {
+    return isDcSessionActive(packCurrent) && isPlausibleDcVoltage(voltage);
+  }
+
+  /// DC charge current may only be published during a real DC session.
+  static bool shouldPublishDcCurrent({required double? packCurrent, required double current}) {
+    return isDcSessionActive(packCurrent) &&
+        isPlausibleDcCurrent(current, voltagePlausible: true);
   }
 
   /// Power in kW from pack voltage/current, or null when either is implausible.

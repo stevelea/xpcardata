@@ -180,7 +180,10 @@ class KeepAliveService {
         await _reacquireWakelock();
       }
     } catch (e) {
-      _logger.log('[KeepAlive] Failed to verify wakelock: $e');
+      // Plugin channel unavailable (AI box): verifying cannot work, so log it
+      // once instead of every heartbeat.
+      _logger.logOnce('wakelock_verify_failed',
+          '[KeepAlive] Cannot verify wakelock (plugin channel unavailable): $e');
     }
   }
 

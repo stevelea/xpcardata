@@ -378,7 +378,8 @@ class BackgroundServiceManager {
           }
         } on MissingPluginException catch (e) {
           // Platform channel not available - mark as broken and fall through
-          _logger.log('[BackgroundService] Platform channel missing in updateStatusNotification: $e');
+          _logger.logOnce('notification_channel_missing',
+            '[BackgroundService] Notifications unavailable on this device (plugin channel missing): $e');
           _platformChannelBroken = true;
         } catch (e) {
           // Background service not available, mark as broken and fall through
@@ -442,7 +443,8 @@ class BackgroundServiceManager {
 
       _statusNotificationEnabled = true;
     } catch (e) {
-      _logger.log('[BackgroundService] Direct notification failed: $e');
+      _logger.logOnce('notification_channel_missing',
+          '[BackgroundService] Notifications unavailable on this device (plugin channel missing): $e');
     }
   }
 

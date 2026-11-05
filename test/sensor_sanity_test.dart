@@ -88,6 +88,84 @@ void main() {
     });
   });
 
+  group('charge temperature band', () {
+    test('rejects the 94 °C mis-scaled reading', () {
+      expect(SensorSanity.isPlausibleChargeTemperature(94), isFalse);
+    });
+
+    test('accepts normal charge temperatures', () {
+      expect(SensorSanity.isPlausibleChargeTemperature(26), isTrue);
+      expect(SensorSanity.isPlausibleChargeTemperature(-10), isTrue);
+      expect(SensorSanity.isPlausibleChargeTemperature(80), isTrue);
+    });
+
+    test('rejects out-of-band and non-finite values', () {
+      expect(SensorSanity.isPlausibleChargeTemperature(80.1), isFalse);
+      expect(SensorSanity.isPlausibleChargeTemperature(-30.1), isFalse);
+      expect(SensorSanity.isPlausibleChargeTemperature(double.nan), isFalse);
+    });
+  });
+
+  group('motor speed sentinels', () {
+    test('rejects the 24,000 rpm front-motor sentinel from a parked RWD car', () {
+      // 0x9C40 = 40000, minus the -16000 offset => 24000 rpm at standstill.
+      expect(SensorSanity.isPlausibleMotorRpm(24000), isFalse);
+      expect(SensorSanity.sanitizeMotorRpm(24000), isNull);
+    });
+
+    test('accepts real motor speeds including reverse', () {
+      expect(SensorSanity.isPlausibleMotorRpm(0), isTrue);
+      expect(SensorSanity.isPlausibleMotorRpm(9000), isTrue);
+      expect(SensorSanity.isPlausibleMotorRpm(-19500), isTrue);
+    });
+
+    test('rejects beyond ±20,000 rpm and non-finite values', () {
+      expect(SensorSanity.isPlausibleMotorRpm(20001), isFalse);
+      expect(SensorSanity.isPlausibleMotorRpm(-20001), isFalse);
+      expect(SensorSanity.isPlausibleMotorRpm(double.nan), isFalse);
+    });
+  });
+
+  group('DC session detection', () {
+    test('requires current flowing into the pack', () {
+      expect(SensorSanity.isDcSessionActive(-45.0), isTrue);
+      expect(SensorSanity.isDcSessionActive(-0.5), isFalse);
+      expect(SensorSanity.isDcSessionActive(0.5), isFalse);
+      expect(SensorSanity.isDcSessionActive(null), isFalse);
+    });
+
+    test('does not publish inlet voltage at pack voltage while idle', () {
+      // The log showed 586 V at the DC inlet with the pack at 0.5 A discharge.
+      expect(
+        SensorSanity.shouldPublishDcVoltage(packCurrent: 0.5, voltage: 586),
+        isFalse,
+      );
+      expect(
+        SensorSanity.shouldPublishDcVoltage(packCurrent: -45.0, voltage: 586),
+        isTrue,
+      );
+      expect(
+        SensorSanity.shouldPublishDcVoltage(packCurrent: -45.0, voltage: 18),
+        isFalse,
+      );
+    });
+
+    test('does not publish the 400 A sentinel while idle', () {
+      expect(
+        SensorSanity.shouldPublishDcCurrent(packCurrent: 0.5, current: 400.5),
+        isFalse,
+      );
+      expect(
+        SensorSanity.shouldPublishDcCurrent(packCurrent: -150.0, current: 150),
+        isTrue,
+      );
+      expect(
+        SensorSanity.shouldPublishDcCurrent(packCurrent: -150.0, current: 900),
+        isFalse,
+      );
+    });
+  });
+
   group('power calculation', () {
     test('computes kW from plausible values', () {
       expect(SensorSanity.computePowerKw(389.5, -12.3)!, closeTo(-4.79, 0.01));

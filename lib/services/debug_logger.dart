@@ -57,6 +57,19 @@ class DebugLogger {
     }
   }
 
+  final Set<String> _onceKeys = {};
+
+  /// Log [message] only the first time [key] is seen.
+  ///
+  /// Plugin-channel failures (wakelock, notifications, SharedPreferences) repeat
+  /// every poll cycle on devices where that channel is missing; one line is
+  /// enough to diagnose it without drowning the rest of the log.
+  void logOnce(String key, String message) {
+    if (_onceKeys.contains(key)) return;
+    _onceKeys.add(key);
+    log(message);
+  }
+
   /// Get all logs
   List<String> getLogs() => _logs.toList();
 
