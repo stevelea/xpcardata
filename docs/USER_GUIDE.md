@@ -271,7 +271,8 @@ The web UI has the same pages as the app:
 - **About** — server version, port, uptime and data source.
 
 The data behind it is exactly the payload the app publishes to MQTT, so the
-browser and Home Assistant cannot disagree.
+browser and Home Assistant cannot disagree. The HTTP API is documented in
+[docs/WEB_API.md](WEB_API.md) if you want to script against it.
 
 Notes:
 

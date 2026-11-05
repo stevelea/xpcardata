@@ -128,6 +128,7 @@ Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcard
 
 - [User Guide](docs/USER_GUIDE.md) - Complete feature documentation
 - [Release Notes](docs/RELEASE_NOTES.md) - Version history and changes
+- [Web API](docs/WEB_API.md) - Remote view endpoints, auth and examples
 - [PID Reference](docs/XPENG_G6_PIDs.md) - OBD-II PID configuration for XPENG G6
 
 ## Architecture
