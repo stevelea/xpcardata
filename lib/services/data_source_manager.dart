@@ -11,6 +11,7 @@ import 'database_service.dart';
 import 'mqtt_service.dart';
 import 'abrp_service.dart';
 import 'car_app_bridge.dart';
+import 'aux_battery_guard.dart';
 import 'charging_session_service.dart';
 import 'native_location_service.dart';
 import 'fleet_analytics_service.dart';
@@ -60,9 +61,15 @@ class DataSourceManager {
   // Auto update check
   Timer? _updateCheckTimer;
   DateTime? _lastUpdateCheck;
-  double _auxBatteryProtectionThreshold = 12.8;
+  /// A healthy resting 12 V lead-acid/AGM rail sits around 12.5-12.7 V, so the
+  /// old 12.8 V default paused polling on perfectly healthy cars (issue seen on
+  /// a parked G6: 12.6 V -> polling stopped until restart).
+  static const double defaultAuxBatteryThreshold = 12.0;
+  double _auxBatteryProtectionThreshold = defaultAuxBatteryThreshold;
   bool _auxBatteryProtectionActive = false; // Currently paused due to low 12V
-  static const double _auxBatteryHysteresis = 0.3; // Resume when voltage rises above threshold + hysteresis
+  AuxBatteryGuard _auxGuard = AuxBatteryGuard(thresholdVolts: defaultAuxBatteryThreshold);
+  Timer? _auxRecheckTimer;
+  static const Duration _auxRecheckInterval = Duration(seconds: 60);
 
   final StreamController<VehicleData> _dataController =
       StreamController<VehicleData>.broadcast();
@@ -257,6 +264,7 @@ class DataSourceManager {
   /// Schedule proxy data publish (batches rapid updates)
   void _scheduleProxyPublish() {
     _proxyPublishTimer?.cancel();
+    _stopAuxRecheck();
     _proxyPublishTimer = Timer(const Duration(milliseconds: 500), () {
       if (_proxyVehicleData != null && _currentSource == DataSource.proxy) {
         _publishProxyData(_proxyVehicleData!);
@@ -485,6 +493,7 @@ class DataSourceManager {
         break;
       case DataSource.proxy:
         _proxyPublishTimer?.cancel();
+    _stopAuxRecheck();
         _proxyVehicleData = null;
         // Resume OBD polling if connected
         if (_obdService.isConnected) {
@@ -932,7 +941,8 @@ class DataSourceManager {
     // Try Hive first (works on AI boxes)
     if (hive.isAvailable) {
       _auxBatteryProtectionEnabled = hive.getSetting<bool>('aux_battery_protection_enabled') ?? true;
-      _auxBatteryProtectionThreshold = hive.getSetting<double>('aux_battery_protection_threshold') ?? 12.8;
+      _auxBatteryProtectionThreshold = hive.getSetting<double>('aux_battery_protection_threshold') ?? defaultAuxBatteryThreshold;
+      _auxGuard = AuxBatteryGuard(thresholdVolts: _auxBatteryProtectionThreshold);
       _logger.log('[DataSourceManager] 12V protection from Hive: enabled=$_auxBatteryProtectionEnabled, threshold=${_auxBatteryProtectionThreshold}V');
       return;
     }
@@ -941,7 +951,8 @@ class DataSourceManager {
     try {
       final prefs = await SharedPreferences.getInstance();
       _auxBatteryProtectionEnabled = prefs.getBool('aux_battery_protection_enabled') ?? true;
-      _auxBatteryProtectionThreshold = prefs.getDouble('aux_battery_protection_threshold') ?? 12.8;
+      _auxBatteryProtectionThreshold = prefs.getDouble('aux_battery_protection_threshold') ?? defaultAuxBatteryThreshold;
+      _auxGuard = AuxBatteryGuard(thresholdVolts: _auxBatteryProtectionThreshold);
       _logger.log('[DataSourceManager] 12V protection from SharedPreferences: enabled=$_auxBatteryProtectionEnabled, threshold=${_auxBatteryProtectionThreshold}V');
     } catch (e) {
       _logger.log('[DataSourceManager] Failed to load 12V protection settings: $e');
@@ -955,6 +966,8 @@ class DataSourceManager {
       // If protection is disabled, immediately clear active state and resume polling
       if (!enabled && _auxBatteryProtectionActive) {
         _auxBatteryProtectionActive = false;
+        _auxGuard.reset();
+        _stopAuxRecheck();
         _obdService.resumePolling();
         _logger.log('[DataSourceManager] 12V protection DISABLED by user - OBD polling RESUMED');
 
@@ -972,8 +985,10 @@ class DataSourceManager {
       _auxBatteryProtectionThreshold = threshold;
       // If threshold was lowered and protection was active, clear it
       // (the new threshold may be below the current voltage)
+      _auxGuard = AuxBatteryGuard(thresholdVolts: threshold);
       if (threshold < oldThreshold && _auxBatteryProtectionActive) {
         _auxBatteryProtectionActive = false;
+        _stopAuxRecheck();
         _obdService.resumePolling();
         _logger.log('[DataSourceManager] 12V protection threshold LOWERED to ${threshold}V - OBD polling RESUMED');
 
@@ -999,44 +1014,74 @@ class DataSourceManager {
     final auxVoltage = data.additionalProperties?['AUX_V'] as double?;
     if (auxVoltage == null) return;
 
-    if (!_auxBatteryProtectionActive) {
-      // Check if we need to activate protection (voltage dropped below threshold)
-      if (auxVoltage < _auxBatteryProtectionThreshold) {
-        _auxBatteryProtectionActive = true;
-        _obdService.pausePolling();
-        _logger.log('[DataSourceManager] 12V BATTERY PROTECTION ACTIVATED: ${auxVoltage.toStringAsFixed(2)}V < ${_auxBatteryProtectionThreshold}V - OBD polling PAUSED');
-
-        // Publish MQTT system alert
-        _mqttService?.publishSystemAlert(
-          alertType: '12v_low',
-          isActive: true,
-          message: '12V battery low (${auxVoltage.toStringAsFixed(1)}V) - OBD polling disabled',
-          additionalData: {
-            'voltage': auxVoltage,
-            'threshold': _auxBatteryProtectionThreshold,
-          },
-        );
-      }
-    } else {
-      // Check if we can deactivate protection (voltage recovered above threshold + hysteresis)
-      final resumeThreshold = _auxBatteryProtectionThreshold + _auxBatteryHysteresis;
-      if (auxVoltage >= resumeThreshold) {
-        _auxBatteryProtectionActive = false;
-        _obdService.resumePolling();
-        _logger.log('[DataSourceManager] 12V battery recovered: ${auxVoltage.toStringAsFixed(2)}V >= ${resumeThreshold.toStringAsFixed(1)}V - OBD polling RESUMED');
-
-        // Publish MQTT alert clear
-        _mqttService?.publishSystemAlert(
-          alertType: '12v_low',
-          isActive: false,
-          message: '12V battery recovered (${auxVoltage.toStringAsFixed(1)}V) - OBD polling resumed',
-          additionalData: {
-            'voltage': auxVoltage,
-            'threshold': _auxBatteryProtectionThreshold,
-          },
-        );
-      }
+    final action = _auxGuard.update(auxVoltage);
+    if (action == AuxBatteryAction.pause) {
+      _activateAuxProtection(auxVoltage);
+    } else if (action == AuxBatteryAction.resume) {
+      _resumeFromAuxProtection(auxVoltage);
     }
+  }
+
+  void _activateAuxProtection(double auxVoltage) {
+    _auxBatteryProtectionActive = true;
+    _obdService.pausePolling();
+    _startAuxRecheck();
+    _logger.log('[DataSourceManager] 12V BATTERY PROTECTION ACTIVATED: ${auxVoltage.toStringAsFixed(2)}V < ${_auxBatteryProtectionThreshold}V '
+        '(${_auxGuard.requiredLowSamples} consecutive samples) - OBD polling PAUSED, rechecking every ${_auxRecheckInterval.inSeconds}s');
+
+    _mqttService?.publishSystemAlert(
+      alertType: '12v_low',
+      isActive: true,
+      message: '12V battery low (${auxVoltage.toStringAsFixed(1)}V) - OBD polling disabled',
+      additionalData: {
+        'voltage': auxVoltage,
+        'threshold': _auxBatteryProtectionThreshold,
+      },
+    );
+  }
+
+  void _resumeFromAuxProtection(double auxVoltage) {
+    _auxBatteryProtectionActive = false;
+    _stopAuxRecheck();
+    _obdService.resumePolling();
+    _logger.log('[DataSourceManager] 12V battery recovered: ${auxVoltage.toStringAsFixed(2)}V >= '
+        '${(_auxBatteryProtectionThreshold + _auxGuard.hysteresisVolts).toStringAsFixed(1)}V - OBD polling RESUMED');
+
+    _mqttService?.publishSystemAlert(
+      alertType: '12v_low',
+      isActive: false,
+      message: '12V battery recovered (${auxVoltage.toStringAsFixed(1)}V) - OBD polling resumed',
+      additionalData: {
+        'voltage': auxVoltage,
+        'threshold': _auxBatteryProtectionThreshold,
+      },
+    );
+  }
+
+  /// While protection is active the normal poll loop is paused, so this timer
+  /// is the only source of new 12 V readings. Without it the guard could never
+  /// observe recovery (the v1.4.25 deadlock).
+  void _startAuxRecheck() {
+    _auxRecheckTimer?.cancel();
+    _auxRecheckTimer = Timer.periodic(_auxRecheckInterval, (_) async {
+      final volts = await _obdService.readAuxVoltageNow();
+      if (volts == null) {
+        _logger.log('[DataSourceManager] 12V recheck: no reading while paused');
+        return;
+      }
+      final action = _auxGuard.update(volts);
+      if (action == AuxBatteryAction.resume) {
+        _resumeFromAuxProtection(volts);
+      } else {
+        _logger.log('[DataSourceManager] 12V recheck: ${volts.toStringAsFixed(2)}V, still below '
+            '${(_auxBatteryProtectionThreshold + _auxGuard.hysteresisVolts).toStringAsFixed(1)}V');
+      }
+    });
+  }
+
+  void _stopAuxRecheck() {
+    _auxRecheckTimer?.cancel();
+    _auxRecheckTimer = null;
   }
 
   /// Enrich vehicle data with current location
@@ -1097,6 +1142,7 @@ class DataSourceManager {
     _stopCurrentSource();
     _stopUpdateCheckTimer();
     _proxyPublishTimer?.cancel();
+    _stopAuxRecheck();
     _chargingSessionSubscription?.cancel();
     _locationService.stopTracking();
     _carInfoService.dispose();

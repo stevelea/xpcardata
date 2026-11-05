@@ -4,7 +4,7 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![Flutter](https://img.shields.io/badge/Flutter-3.x-blue)
-![Version](https://img.shields.io/badge/version-1.4.25-orange)
+![Version](https://img.shields.io/badge/version-1.4.26-orange)
 
 ## Screenshots
 
@@ -63,10 +63,10 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 ### Download
 Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcardata/releases).
 
-**Current Version:** v1.4.25
+**Current Version:** v1.4.26
 
-1. Download `XPCarData-v1.4.25.zip` from the [latest release](https://github.com/stevelea/xpcardata/releases/latest)
-2. Extract the ZIP file to get `XPCarData-v1.4.25.apk`
+1. Download `XPCarData-v1.4.26.zip` from the [latest release](https://github.com/stevelea/xpcardata/releases/latest)
+2. Extract the ZIP file to get `XPCarData-v1.4.26.apk`
 3. Install the APK on your Android device (enable "Install from unknown sources" if prompted)
 
 ### Requirements
@@ -160,7 +160,13 @@ Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcard
 
 ## Version History
 
-### v1.4.25 (Current)
+### v1.4.26 (Current)
+- **12V protection fixed** - the guard paused polling at 12.6V (old 12.8V default) and could never resume because the pause blocked `AUX_V` reads. Default is now 12.0V, pausing needs 3 consecutive low samples, and a 60s recheck resumes polling automatically.
+- **Implausible values dropped** - pack voltage below 100V (contactors open: 9.7V on a parked G6) is ignored instead of poisoning power/range; DC charge current is only published when a plausible DC inlet voltage exists (no more "400A / 18V" while parked).
+- **CAN ERROR retry** - transport errors get one retry instead of dropping four PIDs per cycle.
+- **Web server settings persist via Hive** when SharedPreferences is unavailable.
+
+### v1.4.25
 - **Remote view web interface** - Settings → Remote Access starts an embedded HTTP server (default port 8080) that serves the same pages as the app: dashboard, live PID values with raw bytes, cell voltages/temperatures, charging sessions and the debug log. Optional access token; works over LAN and Tailscale. The JSON API serves the exact MQTT payload, so browser and Home Assistant stay consistent.
 - **WiCAN community profiles fixed (#12)** - Multi-frame PIDs are now indexed against WiCAN's own byte layout (ISO-TP framing and sequence bytes kept), so `B10`-style offsets from community profiles land on the right cells; per-PID `pid_init` headers applied; rawBytes published in the same layout.
 - **Multi-signal PID polling (#6)** - a PID shared by many parameters is requested once per cycle.

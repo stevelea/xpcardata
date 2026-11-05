@@ -112,13 +112,30 @@ class WebServerService {
       _enabled = prefs.getBool(_prefEnabled) ?? false;
       _port = prefs.getInt(_prefPort) ?? defaultPort;
       _token = prefs.getString(_prefToken) ?? '';
+      return;
     } catch (e) {
-      // AI boxes restrict SharedPreferences; fall back to defaults.
-      _logger.log('[WebServer] Settings unavailable, using defaults: $e');
-      _enabled = false;
-      _port = defaultPort;
-      _token = '';
+      _logger.log('[WebServer] SharedPreferences unavailable, trying Hive: $e');
     }
+
+    // AI boxes and some devices cannot open the SharedPreferences channel at
+    // all (PlatformException channel-error). Hive is the app's fallback store.
+    try {
+      final hive = HiveStorageService.instance;
+      if (hive.isAvailable) {
+        _enabled = hive.getSetting<bool>(_prefEnabled) ?? false;
+        _port = hive.getSetting<int>(_prefPort) ?? defaultPort;
+        _token = hive.getSetting<String>(_prefToken) ?? '';
+        _logger.log('[WebServer] Settings restored from Hive (port=$_port, enabled=$_enabled)');
+        return;
+      }
+    } catch (e) {
+      _logger.log('[WebServer] Hive settings unavailable too: $e');
+    }
+
+    _logger.log('[WebServer] No settings store available, using defaults');
+    _enabled = false;
+    _port = defaultPort;
+    _token = '';
   }
 
   Future<void> _persistSettings() async {
@@ -127,6 +144,21 @@ class WebServerService {
       await prefs.setBool(_prefEnabled, _enabled);
       await prefs.setInt(_prefPort, _port);
       await prefs.setString(_prefToken, _token);
+      return;
+    } catch (e) {
+      _logger.log('[WebServer] Could not persist to SharedPreferences, trying Hive: $e');
+    }
+
+    try {
+      final hive = HiveStorageService.instance;
+      if (!hive.isAvailable) {
+        _logger.log('[WebServer] No persistent store; web server settings are session-only');
+        return;
+      }
+      await hive.saveSetting(_prefEnabled, _enabled);
+      await hive.saveSetting(_prefPort, _port);
+      await hive.saveSetting(_prefToken, _token);
+      _logger.log('[WebServer] Settings saved to Hive');
     } catch (e) {
       _logger.log('[WebServer] Could not persist settings: $e');
     }

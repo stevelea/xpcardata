@@ -1,5 +1,45 @@
 # XPCarData Release Notes
 
+## Version 1.4.26 - 2026-11-05
+
+Bug fixes for a live parked-G6 log where the app stopped reading the car and
+published implausible values.
+
+### 12V protection could stop polling permanently
+The guard paused OBD polling when the 12V rail fell below 12.8V — a voltage a
+healthy resting battery routinely sits at (the report showed 12.60V). Because
+the pause also stopped `AUX_V` from being read, the recovery branch could never
+run, so the app stayed silent until restart.
+
+- Default threshold is now **12.0V**; a resting 12.6V battery no longer triggers it.
+- Pausing requires **3 consecutive** low samples, so a single dip (cranking,
+  contactor clap) is ignored.
+- While paused the app re-reads `AUX_V` every 60s and resumes automatically once
+  the rail clears threshold + hysteresis.
+
+### Implausible values are no longer published
+- **Pack voltage**: with the contactors open the G6 answered `221101` with 9.7V;
+  that was published as pack voltage and fed power/range. Values below 100V (or
+  above 1000V) are now rejected and logged, and power is only computed from
+  plausible pack values.
+- **DC charging**: `22031F`/`220320` answer with sentinels (400A, 18V) when no DC
+  session is active. DC current is only published when a plausible DC inlet
+  voltage was seen, so the dashboard and HA no longer show a 400A "charge".
+
+### Adapter hiccups are retried
+`CAN ERROR` / `BUS ERROR` responses (seen on four VCU PIDs in a row in the log)
+are transport failures, not answers from the car. Each PID now gets one silent
+retry before it is skipped for the cycle.
+
+### Web server settings survive restarts
+When SharedPreferences cannot open (AI boxes: `PlatformException channel-error`),
+the remote-access enabled/port/token settings now fall back to Hive instead of
+being session-only.
+
+Tests: 64.
+
+---
+
 ## Version 1.4.25 - 2026-11-05
 
 ### Remote view — web interface

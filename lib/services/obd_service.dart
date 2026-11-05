@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/vehicle_data.dart';
 import '../models/wican_response_parser.dart';
+import 'sensor_sanity.dart';
 import '../models/obd_pid_config.dart';
 import '../models/local_vehicle_profiles.dart';
 import 'debug_logger.dart';
@@ -53,6 +54,11 @@ class OBDService {
   // ECU wake-up tracking: retry on first poll if we get all 7F errors
   bool _ecuWakeupAttempted = false;
   int _consecutive7FErrorCount = 0;
+
+  /// Last DC inlet voltage that passed the plausibility check this session.
+  /// Used to decide whether a DC charge current reading is real (the G6 reports
+  /// 400 A with the inlet at 18 V while parked).
+  double? _lastDcChgVoltage;
   static const int _max7FErrorsBeforeRetry = 5;
 
   Stream<VehicleData> get vehicleDataStream => _dataController.stream;
@@ -116,7 +122,7 @@ class OBDService {
   void pausePolling() {
     if (!_pollingPaused) {
       _pollingPaused = true;
-      _logger.log('[OBDService] Polling PAUSED (proxy client connected)');
+      _logger.log('[OBDService] Polling PAUSED');
     }
   }
 
@@ -125,6 +131,57 @@ class OBDService {
     if (_pollingPaused) {
       _pollingPaused = false;
       _logger.log('[OBDService] Polling RESUMED');
+    }
+  }
+
+  /// Switch the adapter to [header] when it is not already selected.
+  Future<void> _ensureEcuHeader(String header) async {
+    if (header == _currentEcuHeader) return;
+
+    final responseAddr = _getResponseAddress(header);
+    _logger.log('[OBDService] Switching ECU header: ${_currentEcuHeader ?? "unknown"} -> $header (response: $responseAddr)');
+
+    final headerResult = await _sendCommand('ATSH$header');
+    await Future.delayed(const Duration(milliseconds: 50));
+    final craResult = await _sendCommand('ATCRA$responseAddr');
+    await Future.delayed(const Duration(milliseconds: 50));
+    final fcshResult = await _sendCommand('ATFCSH$header');
+    await Future.delayed(const Duration(milliseconds: 50));
+
+    _currentEcuHeader = header;
+    _logger.log('[OBDService] Header switch complete: ATSH=$headerResult, ATCRA=$craResult, ATFCSH=$fcshResult');
+  }
+
+  /// Read only the 12 V rail, bypassing the pause flag.
+  ///
+  /// The aux-battery guard pauses normal polling at low voltage, but it still
+  /// needs a reading to decide when the rail has recovered. This is the only
+  /// query allowed to run while paused.
+  Future<double?> readAuxVoltageNow() async {
+    if (!_isConnected) return null;
+
+    OBDPIDConfig? auxConfig;
+    for (final pid in _customPIDs) {
+      if (pid.name.toUpperCase() == 'AUX_V') {
+        auxConfig = pid;
+        break;
+      }
+    }
+    if (auxConfig == null) return null;
+
+    try {
+      if (auxConfig.header != null) {
+        await _ensureEcuHeader(auxConfig.header!);
+      }
+      final response = await _sendCommand(auxConfig.pid);
+      if (response.isEmpty || SensorSanity.isTransportError(response)) {
+        return null;
+      }
+      final value = auxConfig.parser(response);
+      return value.isFinite ? value : null;
+    } catch (e) {
+      _logger.log('[OBDService] readAuxVoltageNow failed: $e');
+      return null;
     }
   }
 
@@ -989,25 +1046,8 @@ class OBDService {
         }
         try {
           // Switch header if this PID requires a different one
-          // Compare against actual adapter state, not assumed state
-          if (pidConfig.header != null && pidConfig.header != _currentEcuHeader) {
-            final responseAddr = _getResponseAddress(pidConfig.header!);
-            _logger.log('[OBDService] Switching ECU header: ${_currentEcuHeader ?? "unknown"} -> ${pidConfig.header} (response: $responseAddr)');
-
-            // Set CAN transmit header
-            final headerResult = await _sendCommand('ATSH${pidConfig.header}');
-            await Future.delayed(const Duration(milliseconds: 50));
-
-            // Set CAN receive address filter
-            final craResult = await _sendCommand('ATCRA$responseAddr');
-            await Future.delayed(const Duration(milliseconds: 50));
-
-            // Set flow control header for multi-frame responses
-            final fcshResult = await _sendCommand('ATFCSH${pidConfig.header}');
-            await Future.delayed(const Duration(milliseconds: 50));
-
-            _currentEcuHeader = pidConfig.header;
-            _logger.log('[OBDService] Header switch complete: ATSH=$headerResult, ATCRA=$craResult, ATFCSH=$fcshResult');
+          if (pidConfig.header != null) {
+            await _ensureEcuHeader(pidConfig.header!);
           }
 
           // Reuse a response already polled this cycle for the same PID,
@@ -1020,6 +1060,13 @@ class OBDService {
             _logger.log('[OBDService] ${pidConfig.name}: reusing response for PID ${pidConfig.pid}');
           } else {
             response = await _sendCommand(pidConfig.pid);
+            // CAN/BUS errors are transport hiccups, not answers about the car;
+            // one silent retry saves the PID for this cycle.
+            if (SensorSanity.isTransportError(response)) {
+              _logger.log('[OBDService] ${pidConfig.name}: transport error (${response.trim()}), retrying once');
+              await Future.delayed(const Duration(milliseconds: 150));
+              response = await _sendCommand(pidConfig.pid);
+            }
             polledResponses[cacheKey] = response;
           }
 
@@ -1078,8 +1125,15 @@ class OBDService {
               }
               break;
             case OBDPIDType.batteryVoltage:
-              batteryVoltage = value;
-              _logger.log('[OBDService] Voltage: $value V');
+              if (SensorSanity.isPlausiblePackVoltage(value, stateOfCharge: soc)) {
+                batteryVoltage = value;
+                _logger.log('[OBDService] Voltage: $value V');
+              } else {
+                // Contactors open / PID not reporting the pack on this firmware
+                // (a G6 asleep returns 9.7 V for 221101). Publishing that would
+                // poison power, range and the HA sensor.
+                _logger.log('[OBDService] HV_V implausible (${value.toStringAsFixed(1)} V) - ignoring this sample');
+              }
               break;
             case OBDPIDType.odometer:
               odometer = value;
@@ -1149,6 +1203,23 @@ class OBDService {
               else if (nameUpper == 'HV_T_MAX' || (nameLower.contains('temp') && (nameLower.contains('batt') || nameLower.contains('max')))) {
                 batteryTemp = value;
               }
+              // DC inlet values need cross-validation: with no DC session the
+              // G6 answers 22031F with a 400 A sentinel and 220320 with ~18 V.
+              else if (nameUpper == 'DC_CHG_V') {
+                if (SensorSanity.isPlausibleDcVoltage(value)) {
+                  _lastDcChgVoltage = value;
+                  additionalData[pidConfig.name] = value;
+                } else {
+                  _lastDcChgVoltage = null;
+                  _logger.log('[OBDService] DC_CHG_V implausible (${value.toStringAsFixed(0)} V) - no DC session, skipping');
+                }
+              } else if (nameUpper == 'DC_CHG_A') {
+                if (SensorSanity.isPlausibleDcCurrent(value, voltagePlausible: _lastDcChgVoltage != null)) {
+                  additionalData[pidConfig.name] = value;
+                } else {
+                  _logger.log('[OBDService] DC_CHG_A implausible (${value.toStringAsFixed(0)} A) - no DC session, skipping');
+                }
+              }
               // Other values go to additional properties (skip error values)
               else {
                 additionalData[pidConfig.name] = value;
@@ -1163,9 +1234,10 @@ class OBDService {
         await Future.delayed(const Duration(milliseconds: 200));
       }
 
-      // Calculate power if we have voltage and current
-      if (batteryVoltage != null && batteryCurrent != null) {
-        power = (batteryVoltage * batteryCurrent) / 1000; // kW
+      // Calculate power only from plausible pack values
+      final computedPower = SensorSanity.computePowerKw(batteryVoltage, batteryCurrent);
+      if (computedPower != null) {
+        power = computedPower;
         _logger.log('[OBDService] Calculated Power: $power kW');
       }
 
