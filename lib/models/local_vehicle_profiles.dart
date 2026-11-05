@@ -15,7 +15,10 @@ class LocalVehicleProfiles {
     return [
       useLegacyV3XpengProfile ? xpengG6ProfileV3Legacy : xpengG6Profile,
       xpengG3iProfile,
-      // Add more profiles here as they are verified
+      xpengG9Profile,
+      xpengP7Profile,
+      xpengP5Profile,
+      xpengX9Profile,
     ];
   }
 
@@ -913,6 +916,83 @@ class LocalVehicleProfiles {
   /// Reachable by setting [useLegacyV3XpengProfile] = true (Settings → Vehicle
   /// → "Use legacy v3 PIDs"). Use this if v4 regresses on a specific G6
   /// firmware variant. See the v4 docstring above for the diff.
+  /// XPENG models that share the UDS PID set documented in Car Scanner's
+  /// profile 838 ("P5 / P7 / G6 / G9 / X9", Brands=["XPeng"], description
+  /// "[G6 support is experimental]").
+  ///
+  /// The G6 v4 profile above is the verified reference. The P5/P7/G9/X9
+  /// profiles reuse its PIDs and only differ where the source profile itself
+  /// distinguishes the models: motor speed uses a -5000 rpm offset on the
+  /// P5/P7 (400 V platform) and -16000 on the G6/G9 (800 V platform).
+  /// Everything else is the shared request set, so these are marked
+  /// experimental - verify values against the car before trusting them.
+  static List<OBDPIDConfig> _xpengSharedPids({required int motorRpmOffset}) {
+    return xpengG6Profile.pids.map((pid) {
+      if (pid.pid != '220317' && pid.pid != '220318') {
+        return pid;
+      }
+      final formula = '[B4:B5]-$motorRpmOffset';
+      return OBDPIDConfig(
+        name: pid.name,
+        pid: pid.pid,
+        description: pid.description.replaceAll('-16000', '-$motorRpmOffset'),
+        type: pid.type,
+        header: pid.header,
+        priority: pid.priority,
+        formula: formula,
+        parser: (r) => OBDPIDConfig.parseWithFormula(r, formula),
+      );
+    }).toList();
+  }
+
+  static LocalVehicleProfile _xpengSharedProfile({
+    required String name,
+    required String model,
+    required String year,
+    required int motorRpmOffset,
+  }) {
+    return LocalVehicleProfile(
+      name: name,
+      manufacturer: 'XPENG',
+      model: model,
+      year: '$year (shared UDS PID set, experimental)',
+      init: xpengG6Profile.init,
+      pids: _xpengSharedPids(motorRpmOffset: motorRpmOffset),
+    );
+  }
+
+  /// XPENG G9 - 800 V platform, shares the G6 motor-speed offset.
+  static final xpengG9Profile = _xpengSharedProfile(
+    name: 'XPENG G9',
+    model: 'G9',
+    year: '2024+',
+    motorRpmOffset: 16000,
+  );
+
+  /// XPENG P7 - 400 V platform; source profile uses a -5000 rpm offset.
+  static final xpengP7Profile = _xpengSharedProfile(
+    name: 'XPENG P7',
+    model: 'P7',
+    year: '2020+',
+    motorRpmOffset: 5000,
+  );
+
+  /// XPENG P5 - 400 V platform; source profile uses a -5000 rpm offset.
+  static final xpengP5Profile = _xpengSharedProfile(
+    name: 'XPENG P5',
+    model: 'P5',
+    year: '2021+',
+    motorRpmOffset: 5000,
+  );
+
+  /// XPENG X9 - 800 V MPV, shares the G6 motor-speed offset.
+  static final xpengX9Profile = _xpengSharedProfile(
+    name: 'XPENG X9',
+    model: 'X9',
+    year: '2024+',
+    motorRpmOffset: 16000,
+  );
+
   static final xpengG6ProfileV3Legacy = LocalVehicleProfile(
     name: 'XPENG G6',
     manufacturer: 'XPENG',

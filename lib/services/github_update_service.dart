@@ -6,10 +6,20 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'hive_storage_service.dart';
+import 'update_versioning.dart';
 
 /// Hardcoded app version (updated during build)
 /// This avoids package_info_plus which fails on AAOS
-const String appVersion = '1.4.24';
+const String appVersion = '1.4.25';
+
+/// Google Play policy forbids self-updating: a store build must not download
+/// and install APKs itself. Build the Play artifact with
+/// `flutter build appbundle --dart-define=PLAY_BUILD=true`; the updater then
+/// reports availability only and points at the store.
+const bool kPlayBuild = bool.fromEnvironment('PLAY_BUILD');
+
+/// True when this build may install APK updates itself (sideload / GitHub).
+const bool kInAppInstallSupported = !kPlayBuild;
 
 /// Service for checking and downloading updates from GitHub releases
 class GitHubUpdateService {
@@ -33,6 +43,14 @@ class GitHubUpdateService {
   /// Check if an update is available
   bool _updateAvailable = false;
   bool get updateAvailable => _updateAvailable;
+
+  /// True when the available release cannot be installed in place because it
+  /// crosses the v1.4.23 signing-key change, so a one-time uninstall +
+  /// reinstall is required (GitHub issue #14).
+  bool get signingMigrationRequired =>
+      _updateAvailable &&
+      _latestRelease != null &&
+      needsSigningMigration(appVersion, _latestRelease!.version);
 
   /// Download progress (0.0 - 1.0)
   double _downloadProgress = 0.0;
@@ -255,30 +273,10 @@ class GitHubUpdateService {
 
   /// Compare two semantic versions
   /// Returns true if newVersion > currentVersion
-  bool _isNewerVersion(String newVersion, String currentVersion) {
-    // Remove 'v' prefix if present
-    newVersion = newVersion.replaceFirst('v', '');
-    currentVersion = currentVersion.replaceFirst('v', '');
-
-    final newParts = newVersion.split('.').map((e) => int.tryParse(e) ?? 0).toList();
-    final currentParts = currentVersion.split('.').map((e) => int.tryParse(e) ?? 0).toList();
-
-    // Ensure both have at least 3 parts
-    while (newParts.length < 3) {
-      newParts.add(0);
-    }
-    while (currentParts.length < 3) {
-      currentParts.add(0);
-    }
-
-    // Compare major, minor, patch
-    for (var i = 0; i < 3; i++) {
-      if (newParts[i] > currentParts[i]) return true;
-      if (newParts[i] < currentParts[i]) return false;
-    }
-
-    return false; // Versions are equal
-  }
+  ///
+  /// Shared implementation in update_versioning.dart (pure, unit-tested).
+  bool _isNewerVersion(String newVersion, String currentVersion) =>
+      isNewerVersion(newVersion, currentVersion);
 
   /// Download the latest APK (or ZIP containing APK)
   Future<String?> downloadUpdate({

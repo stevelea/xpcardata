@@ -1,4 +1,5 @@
 import '../services/debug_logger.dart';
+import 'wican_response_parser.dart';
 
 /// PID polling priority levels
 /// High priority PIDs are polled every cycle (5 seconds)
@@ -18,6 +19,9 @@ class OBDPIDConfig {
   final String? formula; // Custom formula for parsing (e.g., "A" or "(A*256+B)/4" or "A*0.001")
   final String? header; // ECU header for this PID (e.g., "704" for BMS, "7E0" for VCU)
   final PIDPriority priority; // Polling priority (high = every cycle, low = less frequent)
+  /// True when this PID came from a WiCAN community profile, whose formulas are
+  /// indexed against WiCAN's response layout (see wican_response_parser.dart).
+  final bool useWiCanLayout;
   final double Function(String response) parser;
 
   static final _logger = DebugLogger.instance;
@@ -30,6 +34,7 @@ class OBDPIDConfig {
     this.formula,
     this.header,
     this.priority = PIDPriority.high, // Default to high priority
+    this.useWiCanLayout = false,
     required this.parser,
   });
 
@@ -43,6 +48,7 @@ class OBDPIDConfig {
       'formula': formula,
       'header': header,
       'priority': priority.toString(),
+      'useWiCanLayout': useWiCanLayout,
     };
   }
 
@@ -58,6 +64,7 @@ class OBDPIDConfig {
       (e) => e.toString() == json['priority'],
       orElse: () => PIDPriority.high, // Default to high if not specified
     );
+    final useWiCanLayout = json['useWiCanLayout'] as bool? ?? false;
 
     return OBDPIDConfig(
       name: json['name'] as String,
@@ -67,8 +74,11 @@ class OBDPIDConfig {
       formula: formula,
       header: header,
       priority: priority,
+      useWiCanLayout: useWiCanLayout,
       parser: formula != null && formula.isNotEmpty
-          ? (response) => parseWithFormula(response, formula)
+          ? (response) => useWiCanLayout
+              ? WiCanResponseParser.parse(response, formula)
+              : parseWithFormula(response, formula)
           : getParserForType(type),
     );
   }
@@ -378,6 +388,11 @@ class OBDPIDConfig {
       return 0.0;
     }
   }
+
+  /// Public entry point to the arithmetic evaluator, so alternative response
+  /// layouts (e.g. the WiCAN byte layout in `wican_response_parser.dart`) can
+  /// substitute their own byte values without duplicating operator handling.
+  static double evaluateNumericFormula(String formula) => _evaluateFormula(formula);
 
   /// Formula evaluator supporting arithmetic and bitwise operations
   /// Supports: +, -, *, /, <<, >>, parentheses

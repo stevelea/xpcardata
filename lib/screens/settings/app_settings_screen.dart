@@ -4,7 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../providers/vehicle_data_provider.dart';
-import '../../services/github_update_service.dart' show GitHubUpdateService, appVersion;
+import '../../services/github_update_service.dart'
+    show GitHubUpdateService, appVersion, kInAppInstallSupported;
+import '../../services/update_versioning.dart'
+    show signingMigrationInstructions, signingMigrationSummary;
 import '../../services/background_service.dart';
 import '../../services/keep_alive_service.dart';
 import '../../services/theme_service.dart';
@@ -277,41 +280,60 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
     final release = GitHubUpdateService.instance.latestRelease;
     if (release == null) return;
 
+    // Versions <= 1.4.22 cannot install v1.4.23+ in place (signing key change).
+    final needsMigration =
+        GitHubUpdateService.instance.signingMigrationRequired;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Update Available'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Version ${release.version}',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-            ),
-            const SizedBox(height: 8),
-            Text('Released: ${release.formattedDate}'),
-            if (release.apkSize != null) Text('Size: ${release.formattedSize}'),
-            const SizedBox(height: 16),
-            const Text('Release Notes:', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Container(
-              constraints: const BoxConstraints(maxHeight: 200),
-              child: SingleChildScrollView(
-                child: Text(
-                  release.body.isNotEmpty ? release.body : 'No release notes available',
-                  style: const TextStyle(fontSize: 13),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (needsMigration) ...[
+                _buildSigningMigrationNotice(),
+                const SizedBox(height: 16),
+              ],
+              Text(
+                'Version ${release.version}',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+              const SizedBox(height: 8),
+              Text('Released: ${release.formattedDate}'),
+              if (release.apkSize != null) Text('Size: ${release.formattedSize}'),
+              const SizedBox(height: 16),
+              const Text('Release Notes:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 200),
+                child: SingleChildScrollView(
+                  child: Text(
+                    release.body.isNotEmpty ? release.body : 'No release notes available',
+                    style: const TextStyle(fontSize: 13),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Later'),
           ),
-          if (release.apkDownloadUrl != null)
+          if (needsMigration)
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _showSigningMigrationDialog();
+              },
+              icon: const Icon(Icons.info_outline),
+              label: const Text('Reinstall Steps'),
+            )
+          else if (release.apkDownloadUrl != null && kInAppInstallSupported)
             ElevatedButton.icon(
               onPressed: () {
                 Navigator.pop(context);
@@ -319,7 +341,123 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
               },
               icon: const Icon(Icons.download),
               label: const Text('Download & Install'),
+            )
+          else if (release.apkDownloadUrl != null)
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _showPlayStoreUpdateInfo();
+              },
+              icon: const Icon(Icons.storefront),
+              label: const Text('Get it on Play Store'),
             ),
+        ],
+      ),
+    );
+  }
+
+  /// Orange inline warning used in the Updates card and update dialog when the
+  /// available build cannot be installed in place (signing key change).
+  Widget _buildSigningMigrationNotice() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'One-Time Reinstall Required',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  signingMigrationSummary,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Play builds cannot install APKs themselves (store policy), so the update
+  /// action explains where the update comes from instead of downloading it.
+  void _showPlayStoreUpdateInfo() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Updates via Play Store'),
+        content: const Text(
+          'This build is distributed through the Google Play Store, so updates '
+          'are installed by Play rather than downloaded here.\n\n'
+          'Open the Play Store app, find XPCarData, and tap Update. If no '
+          'update is listed yet, the release is still rolling out.',
+          style: TextStyle(fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Full recovery steps for the signing-key migration, with a copy action so
+  /// users can keep the instructions after the app is uninstalled.
+  void _showSigningMigrationDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('One-Time Reinstall Required'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Text(
+              signingMigrationInstructions,
+              style: const TextStyle(fontSize: 13, height: 1.4),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              try {
+                await Clipboard.setData(
+                  const ClipboardData(text: signingMigrationInstructions),
+                );
+              } catch (e) {
+                // Clipboard can be unavailable on some Android AI boxes.
+                debugPrint('[AppSettings] Clipboard copy failed: $e');
+              }
+              if (dialogContext.mounted) {
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(
+                    content: Text('Reinstall instructions copied'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+            },
+            child: const Text('Copy Instructions'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
         ],
       ),
     );
@@ -540,6 +678,8 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final dataSourceManager = ref.watch(dataSourceManagerProvider);
+    final signingMigrationRequired =
+        GitHubUpdateService.instance.signingMigrationRequired;
 
     return Scaffold(
       appBar: AppBar(
@@ -1063,24 +1203,49 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
                     const Divider(),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              onPressed: _downloadAndInstallUpdate,
-                              icon: const Icon(Icons.download),
-                              label: const Text('Download & Install'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.orange,
-                                foregroundColor: Colors.white,
+                          if (signingMigrationRequired) ...[
+                            _buildSigningMigrationNotice(),
+                            const SizedBox(height: 12),
+                          ],
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: !kInAppInstallSupported
+                                      ? _showPlayStoreUpdateInfo
+                                      : signingMigrationRequired
+                                          ? _showSigningMigrationDialog
+                                          : _downloadAndInstallUpdate,
+                                  icon: Icon(
+                                    !kInAppInstallSupported
+                                        ? Icons.storefront
+                                        : signingMigrationRequired
+                                            ? Icons.info_outline
+                                            : Icons.download,
+                                  ),
+                                  label: Text(
+                                    !kInAppInstallSupported
+                                        ? 'Play Store Update'
+                                        : signingMigrationRequired
+                                            ? 'Reinstall Steps'
+                                            : 'Download & Install',
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.orange,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          OutlinedButton.icon(
-                            onPressed: _showUpdateDialog,
-                            icon: const Icon(Icons.notes),
-                            label: const Text('Notes'),
+                              const SizedBox(width: 8),
+                              OutlinedButton.icon(
+                                onPressed: _showUpdateDialog,
+                                icon: const Icon(Icons.notes),
+                                label: const Text('Notes'),
+                              ),
+                            ],
                           ),
                         ],
                       ),

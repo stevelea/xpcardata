@@ -4,7 +4,7 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 
 ![Platform](https://img.shields.io/badge/platform-Android-green)
 ![Flutter](https://img.shields.io/badge/Flutter-3.x-blue)
-![Version](https://img.shields.io/badge/version-1.4.20-orange)
+![Version](https://img.shields.io/badge/version-1.4.25-orange)
 
 ## Screenshots
 
@@ -52,6 +52,7 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 - **OpenChargeMap integration** - Auto-lookup charger names from GPS coordinates
 - **Priority-based PID polling** - High priority ~5 sec, low priority ~1 min (reduces OBD traffic)
 - Tailscale VPN control from settings
+- **Remote view** - built-in web server serves the dashboard, live PIDs, charging history and debug log to any browser on the LAN or Tailscale
 - In-app updates via GitHub
 - Location services for enhanced ABRP data
 - Configurable alerts (low battery, high temperature)
@@ -62,16 +63,16 @@ A Flutter app for monitoring XPENG electric vehicle battery data via OBD-II Blue
 ### Download
 Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcardata/releases).
 
-**Current Version:** v1.4.20
+**Current Version:** v1.4.25
 
-1. Download `XPCarData-v1.4.20.zip` from the [latest release](https://github.com/stevelea/xpcardata/releases/latest)
-2. Extract the ZIP file to get `XPCarData-v1.4.20.apk`
+1. Download `XPCarData-v1.4.25.zip` from the [latest release](https://github.com/stevelea/xpcardata/releases/latest)
+2. Extract the ZIP file to get `XPCarData-v1.4.25.apk`
 3. Install the APK on your Android device (enable "Install from unknown sources" if prompted)
 
 ### Requirements
 - Android 10 (API 29) or higher
 - OBD-II Bluetooth adapter (ELM327 v1.5+ compatible)
-- XPENG G6 (verified), other XPENG models may need PID adjustments
+- XPENG G6 (verified), plus G9 / P7 / P5 / X9 / G3i profiles (see [docs/XPENG_MODEL_PROFILES.md](docs/XPENG_MODEL_PROFILES.md))
 
 ### Platforms
 - Android phones and tablets
@@ -158,7 +159,18 @@ Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcard
 
 ## Version History
 
-### v1.4.20 (Current)
+### v1.4.25 (Current)
+- **Remote view web interface** - Settings → Remote Access starts an embedded HTTP server (default port 8080) that serves the same pages as the app: dashboard, live PID values with raw bytes, cell voltages/temperatures, charging sessions and the debug log. Optional access token; works over LAN and Tailscale. The JSON API serves the exact MQTT payload, so browser and Home Assistant stay consistent.
+- **WiCAN community profiles fixed (#12)** - Multi-frame PIDs are now indexed against WiCAN's own byte layout (ISO-TP framing and sequence bytes kept), so `B10`-style offsets from community profiles land on the right cells; per-PID `pid_init` headers applied; rawBytes published in the same layout.
+- **Multi-signal PID polling (#6)** - a PID shared by many parameters is requested once per cycle.
+- **Tailscale + MQTT watchdog (#10)** - re-wakes Tailscale when MQTT is down despite VPN "active".
+- **Export PIDs (#13)** - share/clipboard export of `obd_pids.json` from the PID config screen.
+- **One-time reinstall notice (#14)** - builds that can detect the signing-key migration explain the uninstall/reinstall and offer the backup route.
+- **Charge-port sensors (#3)** - raw `BMS_CHG_STATUS` and `CHARGING_HVIL` published to HA, with the evidence protocol for State B in [docs/CHARGE_PORT_STATE.md](docs/CHARGE_PORT_STATE.md).
+- **Play Store readiness (#15)** - `PLAY_BUILD` flag disables the self-updater for store builds; checklist in [docs/PLAY_STORE.md](docs/PLAY_STORE.md).
+- **New XPENG profiles** - G9, P7, P5, X9 (experimental shared UDS PID set, platform motor-speed offsets).
+
+### v1.4.20
 - **Hide broken Charge Limit reading** - PID 221130 produced wrong values (1710%, 2100%); hidden from home screen and HA discovery until a confirmed formula is available. Raw bytes still flow via `value_json.rawBytes.CHG_LIMIT` for diagnosis.
 
 ### v1.4.19
@@ -219,6 +231,7 @@ Get the latest release from [GitHub Releases](https://github.com/stevelea/xpcard
 ### v1.1.0
 - Fleet Statistics with anonymous data sharing
 - Charging session history
+- **Remote view** - built-in web server serves the dashboard, live PIDs, charging history and debug log to any browser on the LAN or Tailscale
 - In-app updates via GitHub
 - Location services for ABRP
 - Country detection for fleet insights

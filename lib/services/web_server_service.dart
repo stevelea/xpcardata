@@ -1,0 +1,402 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../models/vehicle_data.dart';
+import 'data_source_manager.dart';
+import 'debug_logger.dart';
+import 'github_update_service.dart';
+
+typedef WebAssetLoader = Future<String> Function(String assetPath);
+typedef WebSnapshotProvider = Future<Map<String, dynamic>> Function();
+typedef WebSessionsProvider = Future<List<Map<String, dynamic>>> Function(int limit);
+typedef WebLogsProvider = List<String> Function();
+
+/// Embedded HTTP server that exposes the app's dashboard, live PID values,
+/// charging history and debug log to a browser on the LAN or Tailscale.
+///
+/// The JSON served by `/api/state` is exactly [VehicleData.toJson], i.e. the
+/// same payload the app publishes to MQTT, so every field shown in the phone UI
+/// (and every value Home Assistant sees) is available to the web UI without a
+/// second, drifting mapping.
+///
+/// Routes:
+///   GET /                 web UI (assets/web/index.html)
+///   GET /app.css /app.js  static UI assets
+///   GET /api/state        server info + latest VehicleData payload
+///   GET /api/sessions     recent charging sessions (?limit=, default 20)
+///   GET /api/logs         debug log tail (?limit=, default 200)
+///   GET /api/health       liveness probe
+///
+/// Authentication: when a non-empty token is configured, every `/api/*` request
+/// must supply it as the `x-token` header or the `token` query parameter.
+/// Static UI files stay public so the browser can load the app before the user
+/// enters a token.
+class WebServerService {
+  WebServerService._();
+
+  static final WebServerService instance = WebServerService._();
+
+  static const String _prefEnabled = 'webServerEnabled';
+  static const String _prefPort = 'webServerPort';
+  static const String _prefToken = 'webServerToken';
+  static const int defaultPort = 8080;
+
+  final _logger = DebugLogger.instance;
+
+  HttpServer? _server;
+  bool _enabled = false;
+  int _port = defaultPort;
+  String _token = '';
+  String? _lastError;
+  DateTime? _startedAt;
+
+  DataSourceManager? _manager;
+  StreamSubscription<VehicleData>? _dataSubscription;
+  VehicleData? _latest;
+  DateTime? _latestAt;
+
+  // Injection points used by tests (unset in production).
+  WebAssetLoader? assetLoaderOverride;
+  WebSnapshotProvider? snapshotOverride;
+  WebSessionsProvider? sessionsOverride;
+  WebLogsProvider? logsOverride;
+
+  bool get isRunning => _server != null;
+  bool get isEnabled => _enabled;
+  int get port => _port;
+  String get token => _token;
+  String? get lastError => _lastError;
+  DateTime? get startedAt => _startedAt;
+  VehicleData? get latestData => _latest;
+  DateTime? get latestDataAt => _latestAt;
+
+  /// Load persisted settings and attach to [manager] (if given). Starts the
+  /// server when it was enabled in a previous session.
+  Future<void> initialize({DataSourceManager? manager}) async {
+    await _loadSettings();
+    if (manager != null) {
+      attach(manager);
+    }
+    if (_enabled) {
+      await start();
+    }
+  }
+
+  /// Subscribe to the live data stream. Safe to call repeatedly; the provider
+  /// that owns [DataSourceManager] may recreate it.
+  void attach(DataSourceManager manager) {
+    _manager = manager;
+    _dataSubscription?.cancel();
+    _dataSubscription = manager.vehicleDataStream.listen(
+      (data) {
+        _latest = data;
+        _latestAt = DateTime.now();
+      },
+      onError: (Object error) => _logger.log('[WebServer] Data stream error: $error'),
+    );
+  }
+
+  Future<void> _loadSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _enabled = prefs.getBool(_prefEnabled) ?? false;
+      _port = prefs.getInt(_prefPort) ?? defaultPort;
+      _token = prefs.getString(_prefToken) ?? '';
+    } catch (e) {
+      // AI boxes restrict SharedPreferences; fall back to defaults.
+      _logger.log('[WebServer] Settings unavailable, using defaults: $e');
+      _enabled = false;
+      _port = defaultPort;
+      _token = '';
+    }
+  }
+
+  Future<void> _persistSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefEnabled, _enabled);
+      await prefs.setInt(_prefPort, _port);
+      await prefs.setString(_prefToken, _token);
+    } catch (e) {
+      _logger.log('[WebServer] Could not persist settings: $e');
+    }
+  }
+
+  Future<void> setEnabled(bool enabled) async {
+    _enabled = enabled;
+    await _persistSettings();
+    if (enabled) {
+      await start();
+    } else {
+      await stop();
+    }
+  }
+
+  Future<void> setPort(int port) async {
+    if (port < 0 || port > 65535) return;
+    _port = port;
+    await _persistSettings();
+    if (isRunning) {
+      await stop();
+      await start();
+    }
+  }
+
+  Future<void> setToken(String token) async {
+    _token = token.trim();
+    await _persistSettings();
+  }
+
+  /// Bind the HTTP server. Returns true when listening.
+  ///
+  /// [portOverride] and [address] exist for tests (ephemeral port / loopback).
+  Future<bool> start({int? portOverride, InternetAddress? address}) async {
+    if (isRunning) return true;
+
+    final listenPort = portOverride ?? _port;
+    try {
+      _server = await HttpServer.bind(
+        address ?? InternetAddress.anyIPv4,
+        listenPort == 0 ? 0 : listenPort,
+        shared: true,
+      );
+      _port = _server!.port;
+      _startedAt = DateTime.now();
+      _lastError = null;
+
+      _server!.listen(
+        (request) => unawaited(_handleRequest(request)),
+        onError: (Object error) => _logger.log('[WebServer] Socket error: $error'),
+        cancelOnError: false,
+      );
+
+      _logger.log('[WebServer] Listening on port $_port');
+      for (final url in await getUrls()) {
+        _logger.log('[WebServer] Available at $url');
+      }
+      return true;
+    } catch (e) {
+      _server = null;
+      _lastError = '$e';
+      _logger.log('[WebServer] Failed to start on port $listenPort: $e');
+      return false;
+    }
+  }
+
+  Future<void> stop() async {
+    final server = _server;
+    _server = null;
+    _startedAt = null;
+    try {
+      await server?.close(force: true);
+      if (server != null) {
+        _logger.log('[WebServer] Stopped');
+      }
+    } catch (e) {
+      _logger.log('[WebServer] Error stopping: $e');
+    }
+  }
+
+  /// Base URLs reachable from other devices (all non-loopback IPv4 addresses).
+  Future<List<String>> getUrls() async {
+    final urls = <String>[];
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+      );
+      for (final interface in interfaces) {
+        for (final address in interface.addresses) {
+          urls.add('http://${address.address}:$_port');
+        }
+      }
+    } catch (e) {
+      _logger.log('[WebServer] Could not enumerate interfaces: $e');
+    }
+    urls.sort();
+    return urls;
+  }
+
+  /// Snapshot served by `/api/state`.
+  Future<Map<String, dynamic>> snapshot() async {
+    final override = snapshotOverride;
+    if (override != null) return override();
+
+    final data = _latest;
+    final now = DateTime.now();
+    return {
+      'server': {
+        'version': appVersion,
+        'running': isRunning,
+        'port': _port,
+        'startedAt': _startedAt?.toIso8601String(),
+        'uptimeSeconds': _startedAt == null ? 0 : now.difference(_startedAt!).inSeconds,
+        'source': _manager?.currentSource?.name,
+        'authRequired': _token.isNotEmpty,
+        'serverTime': now.toIso8601String(),
+      },
+      'data': data?.toJson(),
+      'dataAgeSeconds': _latestAt == null ? null : now.difference(_latestAt!).inSeconds,
+    };
+  }
+
+  Future<List<Map<String, dynamic>>> _sessions(int limit) async {
+    final override = sessionsOverride;
+    if (override != null) return override(limit);
+
+    final manager = _manager;
+    if (manager == null) return const [];
+    try {
+      final sessions = await manager.chargingSessionService.getRecentSessions(limit: limit);
+      return sessions.map((s) => s.toJson()).toList();
+    } catch (e) {
+      _logger.log('[WebServer] Could not read sessions: $e');
+      return const [];
+    }
+  }
+
+  List<String> _logs(int limit) {
+    final override = logsOverride;
+    if (override != null) return override().take(limit).toList();
+
+    final logs = _logger.getLogs();
+    final start = logs.length > limit ? logs.length - limit : 0;
+    return logs.sublist(start);
+  }
+
+  Future<void> _handleRequest(HttpRequest request) async {
+    final response = request.response;
+    final path = request.uri.path;
+
+    response.headers.set('X-Content-Type-Options', 'nosniff');
+    response.headers.set('Referrer-Policy', 'no-referrer');
+
+    try {
+      if (path.startsWith('/api/')) {
+        // Same-origin UI, but allow other tools (curl from a laptop) too.
+        response.headers.set('Access-Control-Allow-Origin', '*');
+        response.headers.set('Access-Control-Allow-Headers', 'x-token');
+        if (request.method == 'OPTIONS') {
+          response.statusCode = HttpStatus.noContent;
+          await response.close();
+          return;
+        }
+        if (!_isAuthorized(request)) {
+          response.statusCode = HttpStatus.unauthorized;
+          response.headers.contentType = ContentType.json;
+          response.write(jsonEncode({'error': 'unauthorized', 'authRequired': true}));
+          await response.close();
+          return;
+        }
+        await _handleApi(request, path, response);
+        return;
+      }
+
+      await _serveStatic(path, response);
+    } catch (e, stack) {
+      _logger.log('[WebServer] $path failed: $e\n$stack');
+      try {
+        response.statusCode = HttpStatus.internalServerError;
+        response.headers.contentType = ContentType.json;
+        response.write(jsonEncode({'error': 'server_error', 'message': '$e'}));
+        await response.close();
+      } catch (_) {
+        // Response already closed.
+      }
+    }
+  }
+
+  bool _isAuthorized(HttpRequest request) {
+    if (_token.isEmpty) return true;
+    final supplied = request.headers.value('x-token') ?? request.uri.queryParameters['token'];
+    return supplied == _token;
+  }
+
+  Future<void> _handleApi(HttpRequest request, String path, HttpResponse response) async {
+    response.headers.contentType = ContentType.json;
+    response.headers.set('Cache-Control', 'no-store');
+
+    switch (path) {
+      case '/api/state':
+        response.write(jsonEncode(await snapshot()));
+        break;
+      case '/api/sessions':
+        final limit = _intParam(request, 'limit', 20, 1, 200);
+        final sessions = await _sessions(limit);
+        response.write(jsonEncode({'sessions': sessions}));
+        break;
+      case '/api/logs':
+        final limit = _intParam(request, 'limit', 200, 1, 2000);
+        response.write(jsonEncode({'logs': _logs(limit)}));
+        break;
+      case '/api/health':
+        response.write(jsonEncode({
+          'ok': true,
+          'running': isRunning,
+          'port': _port,
+          'version': appVersion,
+          'authRequired': _token.isNotEmpty,
+        }));
+        break;
+      default:
+        response.statusCode = HttpStatus.notFound;
+        response.write(jsonEncode({'error': 'not_found', 'path': path}));
+    }
+
+    await response.close();
+  }
+
+  int _intParam(HttpRequest request, String name, int fallback, int min, int max) {
+    final raw = request.uri.queryParameters[name];
+    final value = int.tryParse(raw ?? '') ?? fallback;
+    return value.clamp(min, max);
+  }
+
+  static const Map<String, String> _staticAssets = {
+    '/': 'assets/web/index.html',
+    '/index.html': 'assets/web/index.html',
+    '/app.css': 'assets/web/app.css',
+    '/app.js': 'assets/web/app.js',
+    '/favicon.svg': 'assets/web/favicon.svg',
+  };
+
+  Future<void> _serveStatic(String path, HttpResponse response) async {
+    final assetPath = _staticAssets[path];
+    if (assetPath == null) {
+      response.statusCode = HttpStatus.notFound;
+      response.headers.contentType = ContentType.html;
+      response.write('<h1>404</h1><p><a href="/">XPCarData remote view</a></p>');
+      await response.close();
+      return;
+    }
+
+    final loader = assetLoaderOverride ?? rootBundle.loadString;
+    final String content;
+    try {
+      content = await loader(assetPath);
+    } catch (e) {
+      response.statusCode = HttpStatus.internalServerError;
+      response.headers.contentType = ContentType.text;
+      response.write('Missing asset $assetPath: $e');
+      await response.close();
+      return;
+    }
+
+    response.headers.contentType = _contentTypeFor(assetPath);
+    response.headers.set('Cache-Control', 'no-cache');
+    response.write(content);
+    await response.close();
+  }
+
+  ContentType _contentTypeFor(String assetPath) {
+    if (assetPath.endsWith('.html')) return ContentType.html;
+    if (assetPath.endsWith('.css')) return ContentType('text', 'css', charset: 'utf-8');
+    if (assetPath.endsWith('.js')) return ContentType('application', 'javascript', charset: 'utf-8');
+    if (assetPath.endsWith('.svg')) return ContentType('image', 'svg+xml', charset: 'utf-8');
+    return ContentType.text;
+  }
+}

@@ -380,7 +380,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObse
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Tap to download and install',
+                  updateService.signingMigrationRequired
+                      ? 'Reinstall required — see Settings → App → Updates'
+                      : 'Tap to download and install',
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.85),
                     fontSize: 13,

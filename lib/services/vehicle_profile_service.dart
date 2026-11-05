@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/vehicle_profile.dart';
 import '../models/obd_pid_config.dart';
+import '../models/wican_response_parser.dart';
 import 'debug_logger.dart';
 
 /// Service for loading and managing WiCAN vehicle profiles
@@ -65,7 +66,11 @@ class VehicleProfileService {
           description: '${param.name} (${param.unit})',
           type: pidType,
           formula: formula,
-          parser: (response) => OBDPIDConfig.parseWithFormula(response, formula),
+          header: profilePid.ecuHeader,
+          useWiCanLayout: true,
+          // WiCAN expressions are indexed against WiCAN's own byte layout, which
+          // keeps ISO-TP framing/sequence bytes in the buffer (issue #12).
+          parser: (response) => WiCanResponseParser.parse(response, formula),
         );
 
         pids.add(pidConfig);

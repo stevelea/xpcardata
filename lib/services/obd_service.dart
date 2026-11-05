@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/vehicle_data.dart';
+import '../models/wican_response_parser.dart';
 import '../models/obd_pid_config.dart';
 import '../models/local_vehicle_profiles.dart';
 import 'debug_logger.dart';
@@ -1048,7 +1049,11 @@ class OBDService {
 
           // Capture cleaned hex bytes for this PID so MQTT can publish them.
           // Skipped if the response was just an error response (returns '').
-          final hex = OBDPIDConfig.extractCleanedHex(response);
+          // WiCAN-profile PIDs publish bytes in WiCAN's layout so HA templates
+          // using the profile's own B offsets line up (issue #12).
+          final hex = pidConfig.useWiCanLayout
+              ? WiCanResponseParser.bytesToHex(response)
+              : OBDPIDConfig.extractCleanedHex(response);
           if (hex.isNotEmpty) {
             rawBytesByPid[pidConfig.name] = hex;
           }

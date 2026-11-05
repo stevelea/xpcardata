@@ -6,6 +6,7 @@ import 'settings/vehicle_settings_screen.dart';
 import 'settings/data_settings_screen.dart';
 import 'settings/app_settings_screen.dart';
 import 'settings/about_settings_screen.dart';
+import 'settings/remote_access_screen.dart';
 
 /// Main settings hub screen with category tiles
 /// Navigates to sub-screens for each settings category
@@ -88,6 +89,17 @@ class SettingsHubScreen extends ConsumerWidget {
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const AppSettingsScreen()),
+                  ),
+                ),
+                _SettingsTile(
+                  icon: Icons.public,
+                  title: 'Remote Access',
+                  subtitle: 'Web server, Tailscale',
+                  color: Colors.cyan,
+                  isTablet: isTablet,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const RemoteAccessScreen()),
                   ),
                 ),
                 _SettingsTile(

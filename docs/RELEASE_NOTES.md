@@ -1,5 +1,124 @@
 # XPCarData Release Notes
 
+## Version 1.4.25 - 2026-11-05
+
+### Remote view — web interface
+
+The app can now serve its own dashboard to a browser on the same Wi-Fi or
+Tailscale network. Enable it in **Settings → Remote Access**, then open the
+address shown on the phone (default port 8080).
+
+- Same pages and fields as the phone app: dashboard tiles, live PID values with
+  raw hex bytes, cell voltages and temperatures, charging sessions, and the
+  debug log.
+- The JSON API serves exactly the payload published to MQTT, so the browser and
+  Home Assistant can never disagree.
+- Optional access token; leave it empty on a trusted home network, set one
+  before using Tailscale or a shared hotspot.
+- Served from the app itself, so no extra server, no cloud, no accounts.
+
+### Issue fixes
+
+- **#12 — WiCAN community profile byte order**: community profiles now index
+  bytes against WiCAN's own response layout (ISO-TP framing and consecutive
+  frame sequence bytes kept in the buffer), so multi-frame PIDs such as Kia/
+  Hyundai `220102` cell voltages land on the offsets the profile author wrote
+  (`B10`, `B17`, …). The per-PID ECU header from `pid_init` (`ATSH7E4`) is
+  applied, and `rawBytes` for these PIDs is published in the same layout.
+- **#6 — multi-signal PID polling**: a PID shared by many parameters is
+  requested once per poll cycle instead of once per parameter.
+- **#10 — Tailscale + MQTT flakiness**: the connectivity watchdog re-wakes
+  Tailscale when MQTT is down even if the VPN reports "active".
+- **#13 — `obd_pids.json` not findable**: the PID configuration screen now has
+  an **Export PIDs** action (share sheet + clipboard) so the configuration can
+  be inspected and backed up without root or a file manager.
+- **#14 — "Package conflict" on update**: builds that can detect the situation
+  now explain the one-time uninstall/reinstall, offer the backup route, and can
+  copy the steps. Versions ≤ 1.4.22 need one reinstall; from 1.4.23 on, in-app
+  updates install normally.
+- **#3 — charge-port state**: the raw `BMS_CHG_STATUS` (22112D) and
+  `CHARGING_HVIL` (22031D) values are now published as Home Assistant sensors,
+  with the evidence protocol needed to prove a State B ("cable connected, not
+  charging") signal documented in `docs/CHARGE_PORT_STATE.md`. State B is not
+  inferred yet because no PID is known to expose it.
+- **#15 — Play Store**: a `PLAY_BUILD` build flag disables the self-updater
+  (Play policy), plus a publishing checklist in `docs/PLAY_STORE.md`.
+
+### New vehicle profiles
+
+- **XPENG G9, P7, P5, X9** are now selectable. They use the shared XPENG UDS
+  PID set that the G6 v4 profile was verified against, with the platform-specific
+  motor-speed offset (−5000 rpm on P5/P7, −16000 rpm on G6/G9/X9). Marked
+  experimental — see `docs/XPENG_MODEL_PROFILES.md` for what to verify and how
+  to report a mismatch.
+
+### Tests
+
+37 unit and integration tests now cover the WiCAN layout, the web server
+(routes, auth, static assets), version comparison, and the model profiles.
+
+---
+
+## Version 1.4.24 - 2026-06-25
+
+### Auto update check
+
+New Settings toggle "Auto Update Check": checks GitHub once a day and shows an
+orange banner on the Home screen when a new version is available. Tap the banner
+to download and install.
+
+### Bug fixes
+
+- **#5 — parser byte misalignment**: `parseWithFormula()`, `parseCellVoltages()`
+  and `parseCellTemperatures()` strip `\r` characters, so bare carriage returns
+  between frames no longer shift byte offsets by one nibble on Kia/Hyundai
+  community profiles.
+- **#9 — short rawBytes**: `extractCleanedHex()` gained a post-strip minimum
+  length guard, so short flow-control responses no longer publish useless
+  single-byte strings to MQTT.
+- **12V battery false-low**: PID echo validation rejects late responses from a
+  previous poll, which could make `AUX_V` read 6.2 V from a stale `DC_CHG_A`
+  response instead of the true ~13.7 V.
+
+---
+
+## Version 1.4.23 - 2026-06-25
+
+### Release signing
+
+APKs are now signed with a permanent release keystore instead of a
+machine-specific debug key. Builds up to 1.4.22 must be uninstalled once before
+installing this version (Android refuses an in-place update across signing
+identities). Every release from here on updates normally.
+
+### Bug fixes
+
+- **#5 — parser `\r` handling** — see 1.4.24.
+- **#9 — rawBytes filtering** — see 1.4.24.
+
+---
+
+## Version 1.4.22 - 2026-06-25
+
+### Bug fixes
+
+- **#8 — backup export on AI boxes**: when SharedPreferences is unavailable, the
+  backup reads `obd_pids.json` from disk instead, so community profiles are
+  included in backups on Carlinkit/Ottocast-style devices.
+
+---
+
+## Version 1.4.21 - 2026-06-15
+
+### Bug fixes
+
+- **#9 — rawBytes**: carriage returns are cleaned from MQTT `rawBytes` hex
+  strings, so Home Assistant Jinja2 templates can index them directly.
+- **#8 — backups**: `obd_pids` is included in backups for community profile
+  persistence, with null entries removed.
+
+---
+
 ## Version 1.4.20 - 2026-06-06
 
 ### Bug fix

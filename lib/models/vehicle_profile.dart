@@ -27,9 +27,13 @@ class ProfilePID {
   final String pid;
   final List<ProfileParameter> parameters;
 
+  /// Per-PID ECU header from the WiCAN profile (`pid_init`, e.g. `ATSH7E4`).
+  final String? init;
+
   const ProfilePID({
     required this.pid,
     required this.parameters,
+    this.init,
   });
 
   factory ProfilePID.fromJson(Map<String, dynamic> json) {
@@ -39,7 +43,18 @@ class ProfilePID {
     return ProfilePID(
       pid: json['pid'] as String,
       parameters: parameters,
+      init: json['pid_init'] as String?,
     );
+  }
+
+  /// ECU header as the app expects it (`7E4`), stripped of any `ATSH` prefix.
+  String? get ecuHeader {
+    final raw = init?.trim();
+    if (raw == null || raw.isEmpty) return null;
+
+    final cleaned = raw.replaceAll(' ', '').toUpperCase();
+    final header = cleaned.startsWith('ATSH') ? cleaned.substring(4) : cleaned;
+    return RegExp(r'^[0-9A-F]{3}$|^[0-9A-F]{8}$').hasMatch(header) ? header : null;
   }
 }
 

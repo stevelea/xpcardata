@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1115">
+  <meta name="color-scheme" content="dark">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="description" content="XPCarData remote view — battery, charging and vehicle data served by the car app over the local network.">
+  <title>XPCarData · Remote view</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <a class="sr-only" id="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <rect x="2.5" y="7" width="16" height="10" rx="3"></rect>
+            <path d="M21.5 10.5v3"></path>
+            <path d="m11 9-2.4 3.3h2.2l-.7 2.9 3-3.9H11L11.7 9z"></path>
+          </svg>
+        </span>
+        <div class="brand-text">
+          <h1>XPCarData</h1>
+          <p>Remote view · served from the car</p>
+        </div>
+      </div>
+
+      <div class="status" role="status" aria-live="polite" aria-label="Server status">
+        <span class="chip is-warn" id="status-link"><span class="dot"></span><span id="status-link-text">connecting</span></span>
+        <span class="chip" id="status-source">source —</span>
+        <span class="chip" id="status-version">v—</span>
+        <span class="chip" id="status-updated">no data</span>
+        <span class="chip is-warn" id="status-auth" hidden>token required</span>
+      </div>
+    </div>
+
+    <nav class="tabs" id="tabs" aria-label="Sections">
+      <a class="tab" id="tab-dashboard" href="#/dashboard" aria-current="page">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M4 18a8 8 0 1 1 16 0"></path>
+          <path d="M12 13.5 15.5 9"></path>
+        </svg>
+        Dashboard
+      </a>
+      <a class="tab" id="tab-live" href="#/live">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M8 6h12M8 12h12M8 18h12"></path>
+          <circle cx="4" cy="6" r="1"></circle>
+          <circle cx="4" cy="12" r="1"></circle>
+          <circle cx="4" cy="18" r="1"></circle>
+        </svg>
+        Live
+      </a>
+      <a class="tab" id="tab-charging" href="#/charging">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"></path>
+        </svg>
+        Charging
+      </a>
+      <a class="tab" id="tab-logs" href="#/logs">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <rect x="3" y="4" width="18" height="16" rx="3"></rect>
+          <path d="m7 9 3 3-3 3M13 15h4"></path>
+        </svg>
+        Logs
+      </a>
+      <a class="tab" id="tab-about" href="#/about">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="12" r="9"></circle>
+          <path d="M12 11v5M12 8h.01"></path>
+        </svg>
+        About
+      </a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <!-- ============================================================ Dashboard -->
+    <section id="page-dashboard" class="page" aria-labelledby="tab-dashboard">
+      <section id="waiting" class="empty card" aria-live="polite">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <rect x="2.5" y="7" width="16" height="10" rx="3"></rect>
+          <path d="M21.5 10.5v3"></path>
+          <path d="M6 12h5"></path>
+        </svg>
+        <h2>Waiting for vehicle data…</h2>
+        <p id="waiting-hint">The web server is up but the app has not received a frame from the car yet. Values appear as soon as the first poll completes.</p>
+      </section>
+
+      <div id="dash-content" hidden>
+        <section class="hero card" aria-labelledby="hero-title">
+          <h2 class="sr-only" id="hero-title">Battery overview</h2>
+
+          <div class="soc">
+            <svg class="ring" viewBox="0 0 160 160" aria-hidden="true" focusable="false">
+              <circle class="ring-track" cx="80" cy="80" r="64"></circle>
+              <circle class="ring-fill" id="soc-ring-fill" cx="80" cy="80" r="64" stroke-dasharray="402.12" stroke-dashoffset="402.12"></circle>
+            </svg>
+            <div class="soc-readout">
+              <span class="soc-value" id="soc-value">—</span>
+              <span class="soc-caption">State of charge</span>
+              <span class="soc-range" id="soc-range">Range —</span>
+            </div>
+          </div>
+
+          <div class="hero-main">
+            <div class="hero-top">
+              <span class="pill" id="charge-pill">Standby</span>
+              <span class="hero-updated" id="hero-updated">no data</span>
+            </div>
+
+            <div class="hero-power">
+              <span class="hero-power-value" id="power-value">—</span>
+              <span class="unit">kW</span>
+              <span class="hero-power-note" id="power-note"></span>
+            </div>
+
+            <dl class="hero-facts">
+              <div>
+                <dt>Speed</dt>
+                <dd id="hero-speed">—</dd>
+              </div>
+              <div>
+                <dt>Odometer</dt>
+                <dd id="hero-odo">—</dd>
+              </div>
+              <div>
+                <dt>Vehicle time</dt>
+                <dd id="hero-time">—</dd>
+              </div>
+            </dl>
+
+            <div class="spark-row" aria-label="Recent history sparklines">
+              <div class="spark-item">
+                <span class="spark-label">SOC</span>
+                <svg class="spark spark--soc" id="spark-soc" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                  <path d=""></path>
+                </svg>
+                <span class="spark-last" id="spark-soc-last">—</span>
+              </div>
+              <div class="spark-item">
+                <span class="spark-label">Power</span>
+                <svg class="spark spark--power" id="spark-power" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                  <path d=""></path>
+                </svg>
+                <span class="spark-last" id="spark-power-last">—</span>
+              </div>
+              <div class="spark-item">
+                <span class="spark-label">Voltage</span>
+                <svg class="spark spark--volt" id="spark-voltage" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                  <path d=""></path>
+                </svg>
+                <span class="spark-last" id="spark-voltage-last">—</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="grid" id="dash-cards"></div>
+      </div>
+    </section>
+
+    <!-- ================================================================= Live -->
+    <section id="page-live" class="page" aria-labelledby="tab-live" hidden>
+      <div class="toolbar">
+        <label class="field" for="live-filter">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m16.5 16.5 4 4"></path>
+          </svg>
+          <input id="live-filter" type="search" placeholder="Filter keys…" autocomplete="off" spellcheck="false" aria-label="Filter live data keys">
+        </label>
+        <span class="count" id="live-count">0 keys</span>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table" id="live-table">
+          <thead>
+            <tr>
+              <th scope="col" data-field="key"><button type="button" class="sortbtn" data-sort="key">Key</button></th>
+              <th scope="col" class="num" data-field="value"><button type="button" class="sortbtn" data-sort="value">Value</button></th>
+              <th scope="col">Raw bytes</th>
+            </tr>
+          </thead>
+          <tbody id="live-body"></tbody>
+        </table>
+      </div>
+      <p id="live-empty" class="empty-line" hidden>Waiting for vehicle data…</p>
+    </section>
+
+    <!-- ============================================================= Charging -->
+    <section id="page-charging" class="page" aria-labelledby="tab-charging" hidden>
+      <div class="summary" id="sessions-summary">
+        <div class="summary-item">
+          <span class="summary-value">—</span>
+          <span class="summary-label">sessions</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-value">—</span>
+          <span class="summary-label">total added</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-value">—</span>
+          <span class="summary-label">average / session</span>
+        </div>
+      </div>
+
+      <div class="grid" id="sessions-list"></div>
+      <p id="sessions-empty" class="empty-line" hidden>No charging sessions recorded yet.</p>
+    </section>
+
+    <!-- ================================================================= Logs -->
+    <section id="page-logs" class="page" aria-labelledby="tab-logs" hidden>
+      <div class="toolbar">
+        <label class="field" for="log-filter">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m16.5 16.5 4 4"></path>
+          </svg>
+          <input id="log-filter" type="search" placeholder="Filter log lines…" autocomplete="off" spellcheck="false" aria-label="Filter log lines">
+        </label>
+        <button type="button" class="btn" id="log-pause" aria-pressed="false">Pause</button>
+        <label class="check" for="log-autoscroll">
+          <input id="log-autoscroll" type="checkbox" checked>
+          Auto-scroll
+        </label>
+        <button type="button" class="btn" id="log-copy">Copy</button>
+        <span class="count" id="log-count">0 lines</span>
+      </div>
+
+      <pre id="log-view" class="logs" tabindex="0" aria-label="Debug log tail"></pre>
+    </section>
+
+    <!-- ================================================================ About -->
+    <section id="page-about" class="page" aria-labelledby="tab-about" hidden>
+      <div class="grid">
+        <section class="card" aria-labelledby="about-server-title">
+          <h2 class="card-title" id="about-server-title">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="3" y="4" width="18" height="16" rx="3"></rect>
+              <path d="M7 9h10M7 13h6"></path>
+            </svg>
+            <span>Server</span>
+          </h2>
+          <dl class="kv" id="about-server"></dl>
+        </section>
+
+        <section class="card" aria-labelledby="about-api-title">
+          <h2 class="card-title" id="about-api-title">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M8 8H6a4 4 0 0 0 0 8h2M16 8h2a4 4 0 0 1 0 8h-2M8 12h8"></path>
+            </svg>
+            <span>API endpoints</span>
+          </h2>
+          <ul class="endpoints">
+            <li><code>GET /</code><span>this page</span></li>
+            <li><code>GET /index.html</code><span>this page</span></li>
+            <li><code>GET /app.css</code><span>stylesheet</span></li>
+            <li><code>GET /app.js</code><span>client app</span></li>
+            <li><code>GET /favicon.svg</code><span>icon</span></li>
+            <li><code>GET /api/state</code><span>server info + latest vehicle frame</span></li>
+            <li><code>GET /api/sessions?limit=20</code><span>recent charging sessions</span></li>
+            <li><code>GET /api/logs?limit=200</code><span>debug log tail</span></li>
+            <li><code>GET /api/health</code><span>liveness probe</span></li>
+          </ul>
+          <p class="hint">When a token is set, every <code>/api/*</code> call is sent with the <code>x-token</code> header. The token is never placed in a URL.</p>
+        </section>
+
+        <section class="card" aria-labelledby="about-token-title">
+          <h2 class="card-title" id="about-token-title">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="4" y="10" width="16" height="10" rx="3"></rect>
+              <path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
+            </svg>
+            <span>Access token</span>
+          </h2>
+          <p class="hint" id="about-token-state">No token stored.</p>
+          <div class="btn-row">
+            <button type="button" class="btn" id="btn-change-token">Change token</button>
+            <button type="button" class="btn ghost" id="btn-clear-token">Sign out / clear token</button>
+          </div>
+          <p class="hint">The token is kept in this browser only (localStorage key <code>xpcd_token</code>) and is sent as the <code>x-token</code> header on every API request.</p>
+        </section>
+
+        <section class="card" aria-labelledby="about-serving-title">
+          <h2 class="card-title" id="about-serving-title">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="12" r="9"></circle>
+              <path d="M3.5 12h17M12 3.5c2.5 2.4 2.5 14.6 0 17M12 3.5c-2.5 2.4-2.5 14.6 0 17"></path>
+            </svg>
+            <span>How this page is served</span>
+          </h2>
+          <p class="hint">
+            This dashboard is served by the XPCarData Android app's embedded HTTP server, directly from the car over
+            your phone hotspot, home LAN or Tailscale. There is no cloud service in the middle and the page works
+            fully offline: all HTML, CSS, JavaScript and icons are bundled as Flutter assets.
+          </p>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============================================================ Token modal -->
+  <div class="modal" id="token-modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="token-title" aria-describedby="token-desc">
+      <h2 id="token-title">Access token required</h2>
+      <p id="token-desc">This XPCarData server is protected. Enter the token configured in the app (Settings → Web server).</p>
+      <form id="token-form" novalidate>
+        <label class="field" for="token-input">
+          <span>Access token</span>
+          <input id="token-input" name="token" type="password" autocomplete="current-password" spellcheck="false" autocapitalize="off">
+        </label>
+        <p class="form-error" id="token-error" role="alert" hidden></p>
+        <div class="btn-row">
+          <button type="submit" class="btn primary">Unlock</button>
+          <button type="button" class="btn ghost" id="token-cancel">Not now</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <noscript>
+    <p style="max-width:60ch;margin:24px auto;padding:0 16px;color:#e8edf5;font-family:system-ui,sans-serif">
+      This remote view needs JavaScript. Static data is still available from <code>/api/state</code>.
+    </p>
+  </noscript>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

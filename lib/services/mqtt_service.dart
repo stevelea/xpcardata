@@ -665,6 +665,41 @@ class MqttService {
         'json_attributes_template': highPriorityAttrs,
         'icon': 'mdi:ev-station',
       },
+      // ==================== Raw charge-port state evidence (issue #3) ====================
+      // The IEC 61851 state published above is A (standby) or C (charging) only.
+      // State B ("vehicle detected": cable connected, not charging) is NOT
+      // inferred. The only PIDs that could carry that bit are BMS_CHG_STATUS
+      // (22112D) and CHARGING_HVIL (22031D), and both are known to hold their
+      // last value after the cable is unplugged (see CLAUDE.md and
+      // charging_session_service.dart), so a non-zero raw value cannot tell
+      // "plugged in, not charging" apart from a stale ECU reading. They are
+      // freshly polled every cycle (high priority) and still report the old
+      // state, so no timestamp/freshness check on the app side can fix that.
+      // Expose the raw values instead so the reporter can collect evidence.
+      //
+      // 22031E is polled but v4 corrected it to VCU_SOC, not DC_CHG_STATUS
+      // (see local_vehicle_profiles.dart); its value is already exposed as the
+      // vcu_soc sensor, so no "DC charge status" sensor exists.
+      {
+        'name': 'BMS Charge Status (Raw 22112D)',
+        'object_id': 'bms_chg_status',
+        'value_template': '{{ value_json.BMS_CHG_STATUS | default(0) | round(0) }}',
+        'json_attributes_template': highPriorityAttrs,
+        'icon': 'mdi:ev-station',
+        'state_class': 'measurement',
+      },
+      {
+        // v4 renamed 22031D to CHARGING_HVIL (WiCAN calls it CHARGER_CONNECTED);
+        // older v3 profiles and mock mode still publish it as CHARGING. The
+        // name stays neutral because which of "connected" or "charging" the
+        // bit actually means is exactly what the evidence has to settle.
+        'name': 'Charging Flag (Raw 22031D)',
+        'object_id': 'charging_flag',
+        'value_template': '{{ value_json.CHARGING_HVIL | default(value_json.CHARGING) | default(0) | round(0) }}',
+        'json_attributes_template': highPriorityAttrs,
+        'icon': 'mdi:ev-plug-type2',
+        'state_class': 'measurement',
+      },
       {
         'name': 'Data Source',
         'object_id': 'data_source',

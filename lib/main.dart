@@ -21,6 +21,7 @@ import 'services/open_charge_map_service.dart';
 import 'services/mock_data_service.dart';
 import 'services/healthcheck_service.dart';
 import 'services/keep_alive_service.dart';
+import 'services/web_server_service.dart';
 import 'services/bm300_battery_service.dart';
 import 'services/connectivity_watchdog_service.dart';
 import 'providers/vehicle_data_provider.dart';
@@ -199,6 +200,17 @@ void main() async {
     print('BM300BatteryService initialized: enabled=${BM300BatteryService.instance.isEnabled}');
   } catch (e) {
     print('BM300BatteryService initialization failed: $e');
+  }
+
+  // Initialize embedded web server (remote view over LAN / Tailscale).
+  // Starts only when enabled in Settings -> Remote Access.
+  try {
+    await WebServerService.instance.initialize();
+    if (WebServerService.instance.isRunning) {
+      print('Web server running on port ${WebServerService.instance.port}');
+    }
+  } catch (e) {
+    print('Web server initialization failed: $e');
   }
 
   runApp(

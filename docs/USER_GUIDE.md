@@ -101,13 +101,25 @@ This reduces OBD bus traffic by approximately 50% while keeping critical data fr
 Configure your vehicle model for accurate battery capacity:
 
 1. Go to **Settings > Vehicle**
-2. Select your XPENG G6 variant:
-   - **24LR**: 2024 Long Range / AWD (87.5 kWh)
-   - **24SR**: 2024 Standard Range (66.0 kWh)
-   - **25LR**: 2025 Long Range / AWD (80.8 kWh)
-   - **25SR**: 2025 Standard Range (68.5 kWh)
+2. Select your model and battery variant:
+   - **XPENG G6**: 2024 LR/AWD (87.5 kWh), 2024 SR (66.0 kWh),
+     2025 LR/AWD (80.8 kWh), 2025 SR (68.5 kWh)
+   - **XPENG G9**: AWD LR (93 kWh), RWD LR (93 kWh), RWD SR (75 kWh)
+   - **XPENG P7**: RWD Long Range (82.7 kWh)
+   - **XPENG G3i**: 460 RWD Standard Range (55 kWh)
+   - **P5 / X9**: choose **Other / Custom** and enter the usable capacity from
+     the manual (no verified preset yet)
+3. Pick the matching **vehicle profile** in **Settings > Connection > OBD PID
+   Configuration** if the app did not auto-detect it.
 
-This affects the "Guestimated Range" calculation on the dashboard.
+The model also chooses the PID profile (G6, G9, P7, P5, X9 or G3i). The G6
+profile is the verified reference; G9/P7/P5/X9 share its UDS PID set and differ
+only in the platform-specific motor-speed offset. See
+[docs/XPENG_MODEL_PROFILES.md](XPENG_MODEL_PROFILES.md) for what is verified and
+what to check first on a non-G6 car.
+
+Battery capacity affects the "Guestimated Range" calculation, charging-session
+kWh and the MQTT `batteryCapacity` field.
 
 ### Fleet Statistics (Anonymous)
 
@@ -233,6 +245,42 @@ All entities are grouped under a single device called "XPCarData {Vehicle ID}" i
 - Home Assistant with MQTT integration configured
 - MQTT broker accessible from both Home Assistant and your vehicle/device
 - Discovery prefix must be `homeassistant` (default)
+
+### Remote View (Web Interface)
+
+Browse the app's own pages from any device on the same network — phone, tablet,
+laptop — without MQTT or Home Assistant.
+
+1. Go to **Settings > Remote Access** and turn on **Web server**.
+2. Open one of the addresses shown (for example `http://192.168.1.50:8080`).
+   The phone lists every reachable address, including its Tailscale `100.x`
+   address when the VPN is up.
+3. Optionally set an **access token** first. With a token, the browser asks for it
+   once and every API call must include it. Leave it empty only on a trusted home
+   network.
+
+The web UI has the same pages as the app:
+
+- **Dashboard** — SOC, range, charging status, HV voltage/current/power, 12V
+  battery, cell voltages and temperatures (with min/max/delta), drivetrain,
+  GPS, odometer.
+- **Live data** — every PID value with its raw hex bytes, searchable/sortable.
+- **Charging** — recent sessions: energy added, SOC delta, duration, type,
+  cost, location.
+- **Logs** — the debug log tail.
+- **About** — server version, port, uptime and data source.
+
+The data behind it is exactly the payload the app publishes to MQTT, so the
+browser and Home Assistant cannot disagree.
+
+Notes:
+
+- The server runs only while XPCarData is running. Keep the app in the
+  foreground or use the keep-alive/background service.
+- Do not port-forward the server to the internet. For remote access, keep the
+  phone on Tailscale and use its `100.x` address.
+- Port and token are stored on the device; changing the port restarts the server
+  immediately.
 
 ### Companion: XPENG Charging History Integration
 

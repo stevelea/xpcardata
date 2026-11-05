@@ -6,6 +6,7 @@ import '../services/database_service.dart';
 import '../services/car_info_service.dart';
 import '../services/obd_service.dart';
 import '../services/data_source_manager.dart';
+import '../services/web_server_service.dart';
 import 'mqtt_provider.dart';
 
 // ==================== Vehicle Settings ====================
@@ -103,6 +104,10 @@ final dataSourceManagerProvider = Provider<DataSourceManager>((ref) {
   );
 
   ref.onDispose(() => manager.dispose());
+  // Let the embedded web server stream the same data the UI receives
+  // (remote view over LAN / Tailscale).
+  WebServerService.instance.attach(manager);
+
   return manager;
 });
 

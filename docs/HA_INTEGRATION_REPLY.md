@@ -24,3 +24,15 @@ There are 3 main options:
    **GitHub:** https://github.com/stevelea/xpcardata
 
    Happy to help if you have questions!
+
+---
+
+## Charge-port state (IEC 61851 State B)
+
+The app publishes `charging_status` as `A` (standby) or `C` (charging). State B
+("vehicle detected": cable plugged in, not charging) cannot be derived from the
+G6's OBD PIDs today — the raw charge-status PIDs latch and stay non-zero after
+the cable is unplugged. Raw `bms_chg_status` (22112D) and `charging_flag`
+(22031D) sensors are exposed so the behaviour can be measured per car. The
+evidence needed and the test for a usable State B signal are in
+[CHARGE_PORT_STATE.md](CHARGE_PORT_STATE.md).
